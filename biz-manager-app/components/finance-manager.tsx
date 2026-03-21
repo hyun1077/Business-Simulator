@@ -79,7 +79,7 @@ export function FinanceManager({
       });
       const result = await response.json();
       if (!response.ok) {
-        setError(result.message ?? "Failed to save finance entry.");
+        setError(result.message ?? "재무 항목 저장에 실패했습니다.");
         return;
       }
       setItems((prev) => [result.entry, ...prev]);
@@ -100,21 +100,21 @@ export function FinanceManager({
         <DashboardTabs current="/dashboard/finance" role={role} />
 
         <div style={{ ...panelStyle, marginBottom: 16 }}>
-          <div style={{ color: "#34d399", marginBottom: 8 }}>Finance Control Center</div>
-          <h1 style={{ marginTop: 0, marginBottom: 8 }}>Revenue and Expense Management</h1>
+          <div style={{ color: "#34d399", marginBottom: 8 }}>재무 관리 센터</div>
+          <h1 style={{ marginTop: 0, marginBottom: 8 }}>매출 · 지출 관리</h1>
           <p style={{ color: "#94a3b8", marginBottom: 0 }}>
-            Track cash flow with separate tabs, date filters, and category-level summaries.
+            매출과 지출을 기간별로 나눠 보고, 카테고리별 흐름까지 한 화면에서 확인할 수 있습니다.
           </p>
         </div>
 
         <div style={{ ...panelStyle, marginBottom: 16 }}>
-          <div style={{ color: "#94a3b8", marginBottom: 10 }}>Date filter</div>
+          <div style={{ color: "#94a3b8", marginBottom: 10 }}>기간 필터</div>
           <div style={tabRowStyle}>
             {[
-              ["all", "All"],
-              ["day", "Today"],
-              ["week", "7 Days"],
-              ["month", "This Month"],
+              ["all", "전체"],
+              ["day", "오늘"],
+              ["week", "최근 7일"],
+              ["month", "이번 달"],
             ].map(([id, label]) => (
               <button key={id} onClick={() => setRangeFilter(id as RangeFilter)} style={rangeFilter === id ? activeTabStyle : tabStyle}>
                 {label}
@@ -125,10 +125,10 @@ export function FinanceManager({
 
         <div style={tabRowStyle}>
           {[
-            ["overview", "Overview"],
-            ["revenue", "Revenue"],
-            ["expense", "Expense"],
-            ["entry", "New Entry"],
+            ["overview", "요약"],
+            ["revenue", "매출"],
+            ["expense", "지출"],
+            ["entry", "새 항목"],
           ].map(([id, label]) => (
             <button key={id} onClick={() => setActiveTab(id as FinanceTab)} style={activeTab === id ? activeTabStyle : tabStyle}>
               {label}
@@ -139,24 +139,24 @@ export function FinanceManager({
         {activeTab === "overview" ? (
           <div style={{ display: "grid", gap: 16 }}>
             <section style={metricGridStyle}>
-              <MetricCard title="Total Revenue" value={totalRevenue} color="#34d399" />
-              <MetricCard title="Total Expense" value={totalExpense} color="#f87171" />
-              <MetricCard title="Net Result" value={profit} color={profit >= 0 ? "#60a5fa" : "#f87171"} />
+              <MetricCard title="총매출" value={totalRevenue} color="#34d399" />
+              <MetricCard title="총지출" value={totalExpense} color="#f87171" />
+              <MetricCard title="순손익" value={profit} color={profit >= 0 ? "#60a5fa" : "#f87171"} />
             </section>
             <section style={twoColumnStyle}>
               <div style={panelStyle}>
-                <h2 style={headingStyle}>Top Revenue Categories</h2>
-                <EntryList items={topRevenue} emptyLabel="No revenue entries yet." />
+                <h2 style={headingStyle}>상위 매출 카테고리</h2>
+                <EntryList items={topRevenue} emptyLabel="매출 항목이 아직 없습니다." />
               </div>
               <div style={panelStyle}>
-                <h2 style={headingStyle}>Top Expense Categories</h2>
-                <EntryList items={topExpense} emptyLabel="No expense entries yet." />
+                <h2 style={headingStyle}>상위 지출 카테고리</h2>
+                <EntryList items={topExpense} emptyLabel="지출 항목이 아직 없습니다." />
               </div>
             </section>
             <section style={panelStyle}>
-              <h2 style={headingStyle}>Category Summary</h2>
+              <h2 style={headingStyle}>카테고리 순효과</h2>
               {categorySummary.length === 0 ? (
-                <div style={{ color: "#64748b" }}>No category data in the current range.</div>
+                <div style={{ color: "#64748b" }}>현재 기간에 집계할 카테고리 데이터가 없습니다.</div>
               ) : (
                 <div style={{ display: "grid", gap: 10 }}>
                   {categorySummary.map((item) => (
@@ -164,7 +164,7 @@ export function FinanceManager({
                       <strong>{item.category}</strong>
                       <span style={{ color: item.amount >= 0 ? "#34d399" : "#f87171" }}>
                         {item.amount >= 0 ? "+" : ""}
-                        {item.amount.toLocaleString()} KRW
+                        {item.amount.toLocaleString()}원
                       </span>
                     </div>
                   ))}
@@ -176,38 +176,38 @@ export function FinanceManager({
 
         {activeTab === "revenue" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>Revenue Entries</h2>
-            <EntryList items={revenueItems} emptyLabel="No revenue entries yet." />
+            <h2 style={headingStyle}>매출 항목</h2>
+            <EntryList items={revenueItems} emptyLabel="매출 항목이 아직 없습니다." />
           </section>
         ) : null}
 
         {activeTab === "expense" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>Expense Entries</h2>
-            <EntryList items={expenseItems} emptyLabel="No expense entries yet." />
+            <h2 style={headingStyle}>지출 항목</h2>
+            <EntryList items={expenseItems} emptyLabel="지출 항목이 아직 없습니다." />
           </section>
         ) : null}
 
         {activeTab === "entry" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>Create New Entry</h2>
+            <h2 style={headingStyle}>새 재무 항목 추가</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as "REVENUE" | "EXPENSE" })} style={inputStyle}>
-                <option value="REVENUE">Revenue</option>
-                <option value="EXPENSE">Expense</option>
+                <option value="REVENUE">매출</option>
+                <option value="EXPENSE">지출</option>
               </select>
               <input value={form.targetDate} onChange={(e) => setForm({ ...form, targetDate: e.target.value })} type="date" style={inputStyle} />
-              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category" style={inputStyle} />
-              <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} placeholder="Amount" style={inputStyle} />
-              <input value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} placeholder="Memo" style={{ ...inputStyle, gridColumn: "1 / -1" }} />
+              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="카테고리" style={inputStyle} />
+              <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} placeholder="금액" style={inputStyle} />
+              <input value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} placeholder="메모" style={{ ...inputStyle, gridColumn: "1 / -1" }} />
             </div>
             {error ? <div style={{ color: "#fca5a5", marginTop: 12 }}>{error}</div> : null}
             <div style={{ marginTop: 14, display: "flex", gap: 12 }}>
               <button onClick={submit} disabled={pending} style={primaryButtonStyle}>
-                {pending ? "Saving..." : "Save Entry"}
+                {pending ? "저장 중..." : "항목 저장"}
               </button>
               <Link href="/dashboard/scheduler" style={continueLinkStyle}>
-                Continue to scheduler
+                스케줄 작성으로 이동
               </Link>
             </div>
           </section>
@@ -221,7 +221,7 @@ function MetricCard({ title, value, color }: { title: string; value: number; col
   return (
     <div style={metricCardStyle}>
       <div style={{ color: "#94a3b8", marginBottom: 8 }}>{title}</div>
-      <div style={{ color, fontSize: 28, fontWeight: 700 }}>{value.toLocaleString()} KRW</div>
+      <div style={{ color, fontSize: 28, fontWeight: 700 }}>{value.toLocaleString()}원</div>
     </div>
   );
 }
@@ -239,7 +239,7 @@ function EntryList({ items, emptyLabel }: { items: FinanceItem[]; emptyLabel: st
             <strong>{item.category}</strong>
             <span style={{ color: item.type === "REVENUE" ? "#34d399" : "#f87171" }}>
               {item.type === "REVENUE" ? "+" : "-"}
-              {item.amount.toLocaleString()} KRW
+              {item.amount.toLocaleString()}원
             </span>
           </div>
           <div style={{ color: "#94a3b8", marginTop: 8 }}>

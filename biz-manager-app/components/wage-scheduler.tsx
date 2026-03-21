@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, Save, TrendingDown, TrendingUp, Users } from "lucide-react";
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
 type Staff = {
   id: string;
@@ -38,6 +38,15 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
     19: 550000,
     20: 450000,
   });
+
+  const assignedSlotCount = useMemo(
+    () =>
+      Object.values(schedule).reduce(
+        (sum, slots) => sum + Object.values(slots).filter((ids) => ids.length > 0).length,
+        0,
+      ),
+    [schedule],
+  );
 
   useEffect(() => {
     if (!selectedStaffId && staff[0]?.id) {
@@ -88,7 +97,7 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
     });
     const result = await response.json();
     setSaving(false);
-    setSaveMessage(response.ok ? "Schedule saved." : result.message ?? "Failed to save schedule.");
+    setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
   }
 
   const hourlyChartData = useMemo(() => {
@@ -119,42 +128,40 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
       <div style={{ maxWidth: 1280, margin: "0 auto", display: "grid", gap: 24 }}>
         <header style={headerStyle}>
           <div>
-            <div style={{ color: "#6ee7b7", marginBottom: 8 }}>Saved schedule workspace</div>
-            <h1 style={{ margin: 0, fontSize: 32 }}>Scheduler and Hourly Efficiency</h1>
+            <div style={{ color: "#6ee7b7", marginBottom: 8 }}>저장 가능한 스케줄 워크스페이스</div>
+            <h1 style={{ margin: 0, fontSize: 32 }}>스케줄 작성과 시간대별 효율 분석</h1>
             <p style={{ color: "#cbd5e1", maxWidth: 760 }}>
-              Registered staff now appear here directly, and shift assignments are saved for the store.
+              등록한 직원이 그대로 나타나며, 배정한 근무표와 시간대별 예상 매출을 함께 저장할 수 있습니다.
             </p>
           </div>
           <div style={{ display: "grid", gap: 10, justifyItems: "end" }}>
             <button onClick={saveSchedule} disabled={saving || loading} style={saveButtonStyle}>
               <Save size={16} />
-              {saving ? "Saving..." : "Save Schedule"}
+              {saving ? "저장 중..." : "스케줄 저장"}
             </button>
             <div style={{ color: saveMessage ? "#6ee7b7" : "#94a3b8", fontSize: 14 }}>
-              {loading ? "Loading schedule..." : saveMessage || "Changes are local until you save."}
+              {loading ? "저장된 스케줄을 불러오는 중..." : saveMessage || "변경 내용은 저장 버튼을 눌러야 반영됩니다."}
             </div>
           </div>
         </header>
 
         <section style={cardGridStyle}>
-          {[
-            { icon: <Users size={18} />, title: "Real staff linkage", body: "The scheduler now uses staff you actually registered." },
-            { icon: <Activity size={18} />, title: "Saved schedule", body: "Assignments persist through the schedule API." },
-            { icon: <TrendingUp size={18} />, title: "Efficiency review", body: "Compare hourly sales, labor cost, and capacity." },
-          ].map((card) => (
-            <div key={card.title} style={infoCardStyle}>
-              <div style={{ color: "#34d399", marginBottom: 10 }}>{card.icon}</div>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>{card.title}</div>
-              <div style={{ color: "#94a3b8", lineHeight: 1.5 }}>{card.body}</div>
-            </div>
-          ))}
+          <InfoCard icon={<Users size={18} />} title="실제 직원 연동" body="직원 관리에서 등록한 사람이 그대로 스케줄 선택 목록에 나타납니다." />
+          <InfoCard icon={<Activity size={18} />} title="저장형 스케줄" body="작성한 배정표는 API를 통해 매장 단위로 저장됩니다." />
+          <InfoCard icon={<TrendingUp size={18} />} title="효율 분석" body="시간대별 매출, 인건비, 처리용량을 비교해 근무표를 조정할 수 있습니다." />
+        </section>
+
+        <section style={summaryGridStyle}>
+          <SummaryCard label="등록 직원 수" value={`${staff.length}명`} />
+          <SummaryCard label="배정 슬롯 수" value={`${assignedSlotCount}칸`} />
+          <SummaryCard label="분석 입력 시간대" value={`${Object.keys(hourlySalesProjection).length}개`} />
         </section>
 
         <section style={gridSectionStyle}>
           <aside style={sidePanelStyle}>
-            <div style={{ marginBottom: 12, fontWeight: 700 }}>Select staff</div>
+            <div style={{ marginBottom: 12, fontWeight: 700 }}>직원 선택</div>
             <div style={{ display: "grid", gap: 8 }}>
-              {staff.length === 0 ? <div style={{ color: "#94a3b8" }}>No staff registered yet.</div> : null}
+              {staff.length === 0 ? <div style={{ color: "#94a3b8" }}>먼저 직원을 등록해주세요.</div> : null}
               {staff.map((member) => (
                 <button
                   key={member.id}
@@ -179,7 +186,7 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
-                  <th style={thStyle}>Time</th>
+                  <th style={thStyle}>시간</th>
                   {DAYS.map((day) => (
                     <th key={day} style={thStyle}>
                       {day}
@@ -234,15 +241,15 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
         <section style={chartPanelStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
             <div>
-              <h2 style={{ marginTop: 0 }}>Hourly Efficiency Analysis</h2>
+              <h2 style={{ marginTop: 0 }}>시간대별 효율 분석</h2>
               <p style={{ color: "#94a3b8" }}>
-                Saved assignments feed into labor cost and capacity for each hour.
+                저장된 근무표를 기준으로 시간대별 인건비와 처리용량을 계산합니다.
               </p>
             </div>
             <div style={{ display: "flex", gap: 12, color: "#cbd5e1", fontSize: 12 }}>
-              <Legend color="rgba(59,130,246,0.6)" label="Sales" />
-              <Legend color="rgba(239,68,68,0.6)" label="Labor" />
-              <Legend color="#34d399" label="Capacity" line />
+              <Legend color="rgba(59,130,246,0.6)" label="매출" />
+              <Legend color="rgba(239,68,68,0.6)" label="인건비" />
+              <Legend color="#34d399" label="처리용량" line />
             </div>
           </div>
           <div style={{ height: 260, display: "flex", alignItems: "end", gap: 6, marginTop: 18 }}>
@@ -267,7 +274,7 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
           <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))", gap: 8 }}>
             {Array.from({ length: 24 }, (_, hour) => (
               <label key={hour} style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}h</span>
+                <span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span>
                 <input
                   type="number"
                   value={hourlySalesProjection[hour] || 0}
@@ -285,15 +292,34 @@ export function WageScheduler({ staff }: { staff: Staff[] }) {
           <div style={{ marginTop: 16, display: "flex", gap: 12, color: "#94a3b8", fontSize: 12 }}>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <TrendingUp size={14} color="#34d399" />
-              Spot profitable hours quickly
+              수익이 높은 시간대를 빠르게 확인
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <TrendingDown size={14} color="#fb923c" />
-              Adjust low-efficiency staffing
+              저효율 시간대 인력 배치 조정
             </span>
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function InfoCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <div style={infoCardStyle}>
+      <div style={{ color: "#34d399", marginBottom: 10 }}>{icon}</div>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>{title}</div>
+      <div style={{ color: "#94a3b8", lineHeight: 1.5 }}>{body}</div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={summaryCardStyle}>
+      <div style={{ color: "#94a3b8", marginBottom: 8 }}>{label}</div>
+      <div style={{ fontWeight: 700, fontSize: 24 }}>{value}</div>
     </div>
   );
 }
@@ -331,6 +357,8 @@ const saveButtonStyle: React.CSSProperties = {
 };
 const cardGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 };
 const infoCardStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
+const summaryGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 };
+const summaryCardStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
 const gridSectionStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, alignItems: "start" };
 const sidePanelStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
 const tablePanelStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a", overflow: "auto" };

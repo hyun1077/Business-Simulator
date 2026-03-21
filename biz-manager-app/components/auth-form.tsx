@@ -6,7 +6,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 type Mode = "login" | "register";
-
 type RegisterRole = "OWNER" | "MANAGER" | "STAFF";
 
 export function AuthForm({ mode }: { mode: Mode }) {
@@ -20,7 +19,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     role: "OWNER" as RegisterRole,
     storeCode: "",
     storeName: "",
-    businessType: "Restaurant",
+    businessType: "음식점",
   });
 
   const isRegister = mode === "register";
@@ -50,7 +49,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
       const result = await response.json();
       if (!response.ok) {
-        setError(result.message ?? "Request failed.");
+        setError(result.message ?? "요청 처리에 실패했습니다.");
         return;
       }
 
@@ -73,13 +72,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
     >
       <div>
         <div style={{ color: "#34d399", fontSize: 14, marginBottom: 8 }}>
-          {isRegister ? "Create account and choose role" : "Sign in"}
+          {isRegister ? "계정 생성과 역할 선택" : "로그인"}
         </div>
-        <h1 style={{ margin: 0, fontSize: 34 }}>{isRegister ? "Register" : "Login"}</h1>
+        <h1 style={{ margin: 0, fontSize: 34 }}>{isRegister ? "회원가입" : "로그인"}</h1>
       </div>
 
       <label style={{ display: "grid", gap: 6 }}>
-        <span>Login ID</span>
+        <span>아이디</span>
         <input
           value={form.loginId}
           onChange={(event) => updateField("loginId", event.target.value)}
@@ -90,12 +89,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </label>
 
       <label style={{ display: "grid", gap: 6 }}>
-        <span>Password</span>
+        <span>비밀번호</span>
         <input
           type="password"
           value={form.password}
           onChange={(event) => updateField("password", event.target.value)}
-          placeholder="At least 6 characters"
+          placeholder="6자 이상"
           required
           style={inputStyle}
         />
@@ -104,31 +103,31 @@ export function AuthForm({ mode }: { mode: Mode }) {
       {isRegister && (
         <>
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Name</span>
+            <span>이름</span>
             <input
               value={form.name}
               onChange={(event) => updateField("name", event.target.value)}
-              placeholder="Kevin"
+              placeholder="홍길동"
               required
               style={inputStyle}
             />
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Role</span>
+            <span>역할</span>
             <select
               value={form.role}
               onChange={(event) => updateField("role", event.target.value)}
               style={inputStyle}
             >
-              <option value="OWNER">Owner</option>
-              <option value="MANAGER">Manager</option>
-              <option value="STAFF">Staff</option>
+              <option value="OWNER">사장</option>
+              <option value="MANAGER">매니저</option>
+              <option value="STAFF">직원</option>
             </select>
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Store Code</span>
+            <span>매장 코드</span>
             <input
               value={form.storeCode}
               onChange={(event) => updateField("storeCode", event.target.value)}
@@ -139,18 +138,18 @@ export function AuthForm({ mode }: { mode: Mode }) {
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Store Name</span>
+            <span>매장 이름</span>
             <input
               value={form.storeName}
               onChange={(event) => updateField("storeName", event.target.value)}
-              placeholder="Kevin Kitchen Main"
+              placeholder="케빈키친 본점"
               required
               style={inputStyle}
             />
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Business Type</span>
+            <span>업종</span>
             <input
               value={form.businessType}
               onChange={(event) => updateField("businessType", event.target.value)}
@@ -175,13 +174,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
           border: "none",
         }}
       >
-        {pending ? "Processing..." : isRegister ? "Create account" : "Login"}
+        {pending ? "처리 중..." : isRegister ? "계정 만들기" : "로그인"}
       </button>
 
       <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center" }}>
-        {isRegister ? "Already have an account? " : "Need a new account? "}
+        {isRegister ? "이미 계정이 있나요? " : "처음 사용하나요? "}
         <Link href={isRegister ? "/login" : "/register"} style={{ color: "#34d399" }}>
-          {isRegister ? "Go to login" : "Go to register"}
+          {isRegister ? "로그인으로 이동" : "회원가입으로 이동"}
         </Link>
       </div>
     </form>

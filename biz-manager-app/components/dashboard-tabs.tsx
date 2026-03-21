@@ -9,10 +9,10 @@ const tabs: Array<{
   label: string;
   minRole: SystemRole;
 }> = [
-  { href: "/dashboard", label: "Dashboard", minRole: "STAFF" },
-  { href: "/dashboard/scheduler", label: "Scheduler", minRole: "STAFF" },
-  { href: "/dashboard/staff", label: "Staff", minRole: "MANAGER" },
-  { href: "/dashboard/finance", label: "Finance", minRole: "OWNER" },
+  { href: "/dashboard", label: "대시보드", minRole: "STAFF" },
+  { href: "/dashboard/scheduler", label: "스케줄", minRole: "STAFF" },
+  { href: "/dashboard/staff", label: "직원 관리", minRole: "MANAGER" },
+  { href: "/dashboard/finance", label: "매출·지출", minRole: "OWNER" },
 ];
 
 export function DashboardTabs({
