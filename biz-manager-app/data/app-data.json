@@ -1,0 +1,42 @@
+{
+  "users": [
+    {
+      "id": "404b8252-3ff2-4b28-af64-5bd56a1cb304",
+      "loginId": "kevin",
+      "name": "kevin",
+      "passwordHash": "$2a$10$HGrXOqijibg.cHrPCsbbfu5nBKCbxvWy268212ujUbxgg.y6deFLm",
+      "systemRole": "STAFF"
+    }
+  ],
+  "stores": [
+    {
+      "id": "700dc31e-da1b-4b5c-a431-033865e5f344",
+      "code": "kevin",
+      "name": "123",
+      "businessType": "Restaurant",
+      "ownerUserId": null
+    }
+  ],
+  "memberships": [
+    {
+      "userId": "404b8252-3ff2-4b28-af64-5bd56a1cb304",
+      "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
+      "role": "STAFF"
+    }
+  ],
+  "staff": [
+    {
+      "id": "7c38f4da-ae92-4315-a33b-aeb459a6f1f4",
+      "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
+      "name": "우현규",
+      "color": "#10b981",
+      "baseWage": 10030,
+      "targetWage": 12000,
+      "capacity": 100000,
+      "incentive": 0,
+      "holidayWage": 2006,
+      "bonusWage": 0
+    }
+  ],
+  "finance": []
+}

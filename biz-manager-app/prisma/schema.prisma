@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum SystemRole {
+  SUPER_ADMIN
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum EntryType {
+  REVENUE
+  EXPENSE
+}
+
+model User {
+  id           String         @id @default(cuid())
+  loginId      String         @unique
+  name         String
+  passwordHash String
+  systemRole   SystemRole     @default(STAFF)
+  ownedStores  Store[]        @relation("StoreOwner")
+  memberships  UserStoreRole[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Store {
+  id             String          @id @default(cuid())
+  code           String          @unique
+  name           String
+  businessType   String
+  ownerUserId    String?
+  ownerUser      User?           @relation("StoreOwner", fields: [ownerUserId], references: [id])
+  memberships    UserStoreRole[]
+  staffProfiles  StaffProfile[]
+  schedules      WeeklySchedule[]
+  workLogs       WorkLog[]
+  financeEntries FinanceEntry[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model UserStoreRole {
+  id        String     @id @default(cuid())
+  userId    String
+  storeId   String
+  role      SystemRole
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([userId, storeId])
+}
+
+model StaffProfile {
+  id          String   @id @default(cuid())
+  storeId     String
+  loginUserId String?
+  name        String
+  color       String
+  baseWage    Int
+  targetWage  Int
+  holidayWage Int
+  bonusWage   Int
+  capacity    Int
+  incentive   Int      @default(0)
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WeeklySchedule {
+  id          String   @id @default(cuid())
+  storeId     String
+  dayOfWeek   Int
+  slotStart   Int
+  slotEnd     Int
+  staffIds    String
+  slotMinutes Int      @default(20)
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WorkLog {
+  id         String   @id @default(cuid())
+  storeId    String
+  staffId    String
+  workDate   DateTime
+  startTime  Int
+  endTime    Int
+  breakHours Float
+  payAmount  Int
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model FinanceEntry {
+  id         String    @id @default(cuid())
+  storeId    String
+  type       EntryType
+  category   String
+  amount     Int
+  memo       String?
+  targetDate DateTime
+  store      Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
