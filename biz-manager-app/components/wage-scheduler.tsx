@@ -5,23 +5,26 @@ import {
   Activity,
   AlertTriangle,
   Calendar,
+  Check,
   ChevronDown,
   ChevronUp,
   Clock,
   FolderOpen,
   Lock,
   PieChart,
+  RotateCcw,
   Save,
   Store,
   TrendingDown,
   Users,
 } from "lucide-react";
 
-const DAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
-const WORK_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
+const CALENDAR_DAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
 
-type SchedulerTab = "schedule" | "analysis" | "summary";
+type TabId = "schedule" | "analysis" | "summary";
 type ScheduleShape = Record<string, Record<number, string[]>>;
+type Pattern = { id: string; name: string; data: Record<number, number> };
 type MonthlyLog = { startTime: number; endTime: number; breakHours: number };
 type Snapshot = { isSaved: boolean; staffSnapshot: Staff[]; dailyLogs: Record<string, MonthlyLog> };
 
@@ -45,13 +48,19 @@ type FinanceItem = {
   memo?: string | null;
 };
 
-const DEFAULT_PATTERNS = [
-  { id: "p1", name: "평일 (학기중)", data: hourlyPattern(300000, 400000, 100000, 11, 13, 18, 20, 9, 22) },
-  { id: "p2", name: "금요일/주말 (피크)", data: hourlyPattern(500000, 800000, 200000, 11, 13, 17, 22, 9, 23) },
-  { id: "p3", name: "방학 기간 (비수기)", data: hourlyPattern(200000, 250000, 80000, 11, 13, 18, 20, 10, 21) },
+type EditForm = {
+  start: string;
+  end: string;
+  break: number | string;
+};
+
+const DEFAULT_PATTERNS: Pattern[] = [
+  { id: "p1", name: "평일 (학기중)", data: createHourlyPattern(300000, 400000, 100000, 11, 13, 18, 20, 9, 22) },
+  { id: "p2", name: "금요일/주말 (피크)", data: createHourlyPattern(500000, 800000, 200000, 11, 13, 17, 22, 9, 23) },
+  { id: "p3", name: "방학 기간 (비수기)", data: createHourlyPattern(200000, 250000, 80000, 11, 13, 18, 20, 10, 21) },
 ];
 
-function hourlyPattern(
+function createHourlyPattern(
   lunch: number,
   dinner: number,
   normal: number,
@@ -77,7 +86,7 @@ function hourlyPattern(
 }
 
 function createInitialSchedule(): ScheduleShape {
-  return Object.fromEntries(WORK_DAYS.map((day) => [day, {} as Record<number, string[]>]));
+  return Object.fromEntries(SCHEDULE_DAYS.map((day) => [day, {} as Record<number, string[]>]));
 }
 
 function formatTime(minutes: number | null | undefined) {
@@ -99,9 +108,10 @@ function sum(values: number[]) {
 
 function buildWeeklyStaffSummary(staffList: Staff[], schedule: ScheduleShape, timeUnit: number, activeSlots: number[]) {
   const hourRatio = timeUnit / 60;
+
   return staffList.map((member) => {
     const weeklyNet = sum(
-      WORK_DAYS.map((day) => {
+      SCHEDULE_DAYS.map((day) => {
         const slots = activeSlots.filter((slot) => schedule?.[day]?.[slot]?.includes(member.id));
         const grossHours = slots.length * hourRatio;
         return Math.max(0, grossHours - calcBreakHours(grossHours));
@@ -110,7 +120,7 @@ function buildWeeklyStaffSummary(staffList: Staff[], schedule: ScheduleShape, ti
 
     const workPayWeekly = Math.round(
       sum(
-        WORK_DAYS.map((day) => {
+        SCHEDULE_DAYS.map((day) => {
           const slots = activeSlots.filter((slot) => schedule?.[day]?.[slot]?.includes(member.id));
           return slots.length * (member.baseWage + member.bonusWage) * hourRatio;
         }),
@@ -138,7 +148,7 @@ export function WageScheduler({
   financeItems: FinanceItem[];
   canEdit: boolean;
 }) {
-  const [tab, setTab] = useState<SchedulerTab>("schedule");
+  const [tab, setTab] = useState<TabId>("schedule");
   const [timeUnit, setTimeUnit] = useState<20 | 30 | 60>(20);
   const [showEarlyHours, setShowEarlyHours] = useState(false);
   const [businessHours, setBusinessHours] = useState({ start: 10, end: 22 });
@@ -148,7 +158,7 @@ export function WageScheduler({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
-  const [patterns, setPatterns] = useState(DEFAULT_PATTERNS);
+  const [patterns, setPatterns] = useState<Pattern[]>(DEFAULT_PATTERNS);
   const [selectedPatternId, setSelectedPatternId] = useState(DEFAULT_PATTERNS[0].id);
   const [newPatternName, setNewPatternName] = useState("");
   const [hourlySalesProjection, setHourlySalesProjection] = useState<Record<number, number>>({
@@ -158,6 +168,9 @@ export function WageScheduler({
   const [targetMonth, setTargetMonth] = useState(3);
   const [monthlySnapshots, setMonthlySnapshots] = useState<Record<string, Snapshot>>({});
   const [manualEdits, setManualEdits] = useState<Record<string, MonthlyLog | "DELETE">>({});
+  const [editingDate, setEditingDate] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>({ start: "", end: "", break: 0 });
+
   const row11AmRef = useRef<HTMLTableRowElement | null>(null);
 
   const activeSlots = useMemo(
@@ -168,10 +181,12 @@ export function WageScheduler({
     () => activeSlots.filter((slot) => (showEarlyHours ? true : slot < 60 || slot >= 540)),
     [activeSlots, showEarlyHours],
   );
+
   const weeklySummary = useMemo(
     () => buildWeeklyStaffSummary(staff, schedule, timeUnit, activeSlots),
     [staff, schedule, timeUnit, activeSlots],
   );
+
   const totalRevenue = useMemo(
     () => sum(financeItems.filter((item) => item.type === "REVENUE").map((item) => item.amount)),
     [financeItems],
@@ -203,6 +218,7 @@ export function WageScheduler({
         setLoading(false);
       }
     }
+
     void loadSchedule();
   }, []);
 
@@ -228,11 +244,16 @@ export function WageScheduler({
     if (!canEdit) return;
     setSaving(true);
     setSaveMessage("");
+
     try {
       const response = await fetch("/api/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule }),
+        body: JSON.stringify({
+          timeUnit,
+          hourlySalesProjection,
+          assignments: schedule,
+        }),
       });
       const result = await response.json();
       setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
@@ -246,24 +267,31 @@ export function WageScheduler({
   function generateDefaultLogsForMonth(year: number, month: number) {
     const logs: Record<string, MonthlyLog> = {};
     const daysInMonth = new Date(year, month, 0).getDate();
+
     staff.forEach((member) => {
       for (let date = 1; date <= daysInMonth; date += 1) {
-        const dayLabel = DAYS[new Date(year, month - 1, date).getDay()];
+        const dayLabel = CALENDAR_DAYS[new Date(year, month - 1, date).getDay()];
         const dateKey = `${year}-${month}-${date}-${member.id}`;
         const slots = activeSlots.filter((slot) => schedule?.[dayLabel]?.[slot]?.includes(member.id));
         if (slots.length > 0) {
           const startTime = Math.min(...slots);
           const endTime = Math.max(...slots) + timeUnit;
-          logs[dateKey] = { startTime, endTime, breakHours: calcBreakHours((endTime - startTime) / 60) };
+          logs[dateKey] = {
+            startTime,
+            endTime,
+            breakHours: calcBreakHours((endTime - startTime) / 60),
+          };
         }
       }
     });
+
     return logs;
   }
 
   const currentMonthLogs = useMemo(() => {
     const monthKey = `${targetYear}-${targetMonth}`;
     if (monthlySnapshots[monthKey]) return monthlySnapshots[monthKey].dailyLogs;
+
     const merged = { ...generateDefaultLogsForMonth(targetYear, targetMonth) };
     Object.entries(manualEdits).forEach(([key, value]) => {
       const [year, month] = key.split("-").map(Number);
@@ -273,16 +301,18 @@ export function WageScheduler({
       }
     });
     return merged;
-  }, [manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, activeSlots, timeUnit]);
+  }, [activeSlots, manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, timeUnit]);
 
   const monthlyStats = useMemo(() => {
     const monthKey = `${targetYear}-${targetMonth}`;
     const sourceStaff = monthlySnapshots[monthKey]?.staffSnapshot ?? staff;
     let totalLabor = 0;
+
     const staffStats = sourceStaff.map((member) => {
       let monthlyGross = 0;
       let totalPay = member.incentive;
       let workedDays = 0;
+
       Object.entries(currentMonthLogs).forEach(([key, log]) => {
         if (key.endsWith(`-${member.id}`)) {
           const gross = (log.endTime - log.startTime) / 60;
@@ -292,10 +322,16 @@ export function WageScheduler({
           workedDays += 1;
         }
       });
+
       totalLabor += totalPay;
       return { ...member, monthlyGross, totalPay, workedDays };
     });
-    return { totalLabor, staffStats, isSaved: Boolean(monthlySnapshots[monthKey]) };
+
+    return {
+      totalLabor,
+      staffStats,
+      isSaved: Boolean(monthlySnapshots[monthKey]),
+    };
   }, [currentMonthLogs, monthlySnapshots, staff, targetMonth, targetYear]);
 
   const monthlyProfit = totalRevenue - totalExpense - monthlyStats.totalLabor;
@@ -308,8 +344,9 @@ export function WageScheduler({
         const slotsInHour = activeSlots.filter((slot) => slot >= hour * 60 && slot < (hour + 1) * 60);
         let laborCost = 0;
         let capacity = 0;
+
         slotsInHour.forEach((slot) => {
-          WORK_DAYS.forEach((day) => {
+          SCHEDULE_DAYS.forEach((day) => {
             (schedule[day]?.[slot] || []).forEach((staffId) => {
               const member = staff.find((item) => item.id === staffId);
               if (!member) return;
@@ -318,6 +355,7 @@ export function WageScheduler({
             });
           });
         });
+
         return { hour, sales, laborCost, capacity };
       }),
     [activeSlots, hourlySalesProjection, schedule, staff, timeUnit],
@@ -331,8 +369,16 @@ export function WageScheduler({
   }
 
   function saveCurrentAsPattern() {
-    if (!newPatternName.trim()) return alert("패턴 이름을 입력해주세요.");
-    const next = { id: `custom-${Date.now()}`, name: newPatternName.trim(), data: { ...hourlySalesProjection } };
+    if (!newPatternName.trim()) {
+      alert("패턴 이름을 입력해주세요.");
+      return;
+    }
+
+    const next = {
+      id: `custom-${Date.now()}`,
+      name: newPatternName.trim(),
+      data: { ...hourlySalesProjection },
+    };
     setPatterns((prev) => [...prev, next]);
     setSelectedPatternId(next.id);
     setNewPatternName("");
@@ -348,6 +394,65 @@ export function WageScheduler({
         dailyLogs: JSON.parse(JSON.stringify(currentMonthLogs)) as Record<string, MonthlyLog>,
       },
     }));
+    setManualEdits((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        const [year, month] = key.split("-").map(Number);
+        if (year === targetYear && month === targetMonth) delete next[key];
+      });
+      return next;
+    });
+  }
+
+  function cancelMonthlySnapshot() {
+    const monthKey = `${targetYear}-${targetMonth}`;
+    setMonthlySnapshots((prev) => {
+      const next = { ...prev };
+      delete next[monthKey];
+      return next;
+    });
+  }
+
+  function startEditing(dateKey: string, log?: MonthlyLog) {
+    setEditingDate(dateKey);
+    if (log) {
+      setEditForm({
+        start: formatTime(log.startTime),
+        end: formatTime(log.endTime),
+        break: log.breakHours,
+      });
+      return;
+    }
+    setEditForm({ start: "11:00", end: "20:00", break: 1 });
+  }
+
+  function saveEditing() {
+    if (!editingDate) return;
+    const [startHour, startMinute] = editForm.start.split(":").map(Number);
+    const [endHour, endMinute] = editForm.end.split(":").map(Number);
+    setManualEdits((prev) => ({
+      ...prev,
+      [editingDate]: {
+        startTime: startHour * 60 + startMinute,
+        endTime: endHour * 60 + endMinute,
+        breakHours: Number(editForm.break) || 0,
+      },
+    }));
+    setEditingDate(null);
+  }
+
+  function deleteLog(dateKey: string) {
+    setManualEdits((prev) => ({ ...prev, [dateKey]: "DELETE" }));
+    setEditingDate(null);
+  }
+
+  function revertLog(dateKey: string) {
+    setManualEdits((prev) => {
+      const next = { ...prev };
+      delete next[dateKey];
+      return next;
+    });
+    setEditingDate(null);
   }
 
   return (
@@ -359,7 +464,7 @@ export function WageScheduler({
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-400">Scheduler Workspace</div>
               <h1 className="mt-2 text-2xl font-bold">스케줄, 분석, 월별 근무일지를 한 화면에서 관리</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                20분, 30분, 1시간 단위 전환과 시간대별 효율 분석, 월 급여 마감 흐름을 다시 붙였습니다.
+                시간 단위 전환, 밀도 높은 주간 배정표, 시간대별 효율 차트, 월별 급여 마감 흐름을 다시 묶었습니다.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -397,7 +502,7 @@ export function WageScheduler({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setTab(item.id as SchedulerTab)}
+                onClick={() => setTab(item.id as TabId)}
                 className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium ${
                   tab === item.id ? "border-emerald-500 bg-emerald-600 text-white" : "border-slate-700 bg-slate-900 text-slate-300"
                 }`}
@@ -413,7 +518,10 @@ export function WageScheduler({
           <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
             <aside className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Clock className="h-4 w-4 text-emerald-400" />시간 단위</div>
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <Clock className="h-4 w-4 text-emerald-400" />
+                  시간 단위
+                </div>
                 <div className="flex gap-2">
                   {[20, 30, 60].map((unit) => (
                     <button
@@ -436,11 +544,14 @@ export function WageScheduler({
                     {showEarlyHours ? "새벽 접기" : "새벽 펼치기"}
                   </button>
                 </div>
-                <p className="text-xs leading-5 text-slate-400">기본값은 오전 9시 이후만 보여주며 필요하면 새벽 시간대까지 확장할 수 있습니다.</p>
+                <p className="text-xs leading-5 text-slate-400">기본값은 오전 9시 이후만 보여주고, 필요하면 새벽 시간대까지 확장할 수 있습니다.</p>
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-emerald-400" />직원 선택</div>
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <Users className="h-4 w-4 text-emerald-400" />
+                  직원 선택
+                </div>
                 <div className="grid gap-2">
                   {staff.map((member) => (
                     <button
@@ -467,7 +578,9 @@ export function WageScheduler({
                         <span>{item.staffName}</span>
                         <span className="text-emerald-400">{item.weeklyNet.toFixed(1)}h</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-400">주급 {item.workPayWeekly.toLocaleString()}원 · 월 예상 {item.monthlyTotalPay.toLocaleString()}원</div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        주급 {item.workPayWeekly.toLocaleString()}원 · 월 예상 {item.monthlyTotalPay.toLocaleString()}원
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -478,7 +591,7 @@ export function WageScheduler({
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold">주간 배정표</div>
-                  <div className="text-xs text-slate-400">원본처럼 20분, 30분, 1시간 단위로 바꾸면 표도 바로 다시 계산됩니다.</div>
+                  <div className="text-xs text-slate-400">원본처럼 20분, 30분, 1시간 단위로 바꾸면 표도 즉시 다시 계산됩니다.</div>
                 </div>
                 {!canEdit ? <div className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-400">직원 계정은 읽기 전용입니다.</div> : null}
               </div>
@@ -488,18 +601,31 @@ export function WageScheduler({
                   <thead className="sticky top-0 z-20 bg-slate-900 text-slate-300">
                     <tr>
                       <th className="w-24 border-b border-r border-slate-700 px-3 py-2 text-left">시간</th>
-                      {WORK_DAYS.map((day) => <th key={day} className="min-w-[108px] border-b border-r border-slate-700 px-3 py-2 text-center">{day}</th>)}
+                      {SCHEDULE_DAYS.map((day) => (
+                        <th key={day} className="min-w-[108px] border-b border-r border-slate-700 px-3 py-2 text-center">
+                          {day}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="bg-slate-950/50">
-                    {!showEarlyHours ? <tr><td colSpan={8} className="cursor-pointer border-b border-slate-800 bg-slate-900/70 py-2 text-center text-[10px] text-slate-500" onClick={() => setShowEarlyHours(true)}>새벽 시간 숨김 (눌러서 펼치기)</td></tr> : null}
+                    {!showEarlyHours ? (
+                      <tr>
+                        <td colSpan={8} className="cursor-pointer border-b border-slate-800 bg-slate-900/70 py-2 text-center text-[10px] text-slate-500" onClick={() => setShowEarlyHours(true)}>
+                          새벽 시간 숨김 (눌러서 펼치기)
+                        </td>
+                      </tr>
+                    ) : null}
+
                     {visibleSlots.map((slot) => {
                       const isHourStart = slot % 60 === 0;
                       const borderClass = isHourStart ? "border-t-2 border-slate-600" : "border-t border-slate-800/60";
                       return (
                         <tr key={slot} ref={slot === 660 ? row11AmRef : null}>
-                          <td className={`border-r border-slate-700 bg-slate-900/60 px-3 py-1 font-mono ${isHourStart ? "font-bold text-slate-200" : "text-[10px] text-slate-500"} ${borderClass}`}>{formatTime(slot)}</td>
-                          {WORK_DAYS.map((day) => {
+                          <td className={`border-r border-slate-700 bg-slate-900/60 px-3 py-1 font-mono ${isHourStart ? "font-bold text-slate-200" : "text-[10px] text-slate-500"} ${borderClass}`}>
+                            {formatTime(slot)}
+                          </td>
+                          {SCHEDULE_DAYS.map((day) => {
                             const assignedIds = schedule[day]?.[slot] || [];
                             return (
                               <td
@@ -518,7 +644,11 @@ export function WageScheduler({
                                   {assignedIds.map((staffId) => {
                                     const member = staff.find((item) => item.id === staffId);
                                     if (!member) return null;
-                                    return <span key={staffId} className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: member.color }}>{member.name}</span>;
+                                    return (
+                                      <span key={staffId} className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: member.color }}>
+                                        {member.name}
+                                      </span>
+                                    );
                                   })}
                                 </div>
                               </td>
@@ -538,23 +668,35 @@ export function WageScheduler({
           <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
             <section className="space-y-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-emerald-400" />매출 패턴 불러오기</div>
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
+                  <FolderOpen className="h-4 w-4 text-emerald-400" />
+                  매출 패턴 불러오기
+                </div>
                 <div className="space-y-3">
                   <select value={selectedPatternId} onChange={(event) => loadPattern(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-                    {patterns.map((pattern) => <option key={pattern.id} value={pattern.id}>{pattern.name}</option>)}
+                    {patterns.map((pattern) => (
+                      <option key={pattern.id} value={pattern.id}>
+                        {pattern.name}
+                      </option>
+                    ))}
                   </select>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     <div className="mb-2 text-xs text-slate-400">현재 패턴 저장</div>
                     <div className="flex gap-2">
                       <input value={newPatternName} onChange={(event) => setNewPatternName(event.target.value)} placeholder="예: 금요일 피크" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm" />
-                      <button type="button" onClick={saveCurrentAsPattern} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">저장</button>
+                      <button type="button" onClick={saveCurrentAsPattern} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">
+                        저장
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><Store className="h-4 w-4 text-emerald-400" />월 손익 개요</div>
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
+                  <Store className="h-4 w-4 text-emerald-400" />
+                  월 손익 개요
+                </div>
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between"><span className="text-slate-400">총 매출</span><span className="font-semibold text-emerald-400">{totalRevenue.toLocaleString()}원</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">총 지출</span><span className="font-semibold text-red-400">-{totalExpense.toLocaleString()}원</span></div>
@@ -594,6 +736,7 @@ export function WageScheduler({
                   const overload = item.sales > item.capacity && item.capacity > 0;
                   const idle = item.sales < item.capacity * 0.3 && item.laborCost > 0;
                   const inBusiness = item.hour >= businessHours.start && item.hour <= businessHours.end;
+
                   return (
                     <div key={item.hour} className={`group relative flex h-full min-w-[34px] flex-1 flex-col justify-end ${!inBusiness ? "opacity-35" : ""}`}>
                       <div className="mb-1 flex h-4 items-center justify-center">
@@ -615,7 +758,12 @@ export function WageScheduler({
                 {Array.from({ length: 24 }, (_, hour) => (
                   <label key={hour} className="flex flex-col gap-1">
                     <span className="text-center text-[10px] text-slate-500">{hour}시</span>
-                    <input type="number" value={hourlySalesProjection[hour] || 0} onChange={(event) => setHourlySalesProjection((prev) => ({ ...prev, [hour]: Number(event.target.value) }))} className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-center text-[11px]" />
+                    <input
+                      type="number"
+                      value={hourlySalesProjection[hour] || 0}
+                      onChange={(event) => setHourlySalesProjection((prev) => ({ ...prev, [hour]: Number(event.target.value) }))}
+                      className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-center text-[11px]"
+                    />
                   </label>
                 ))}
               </div>
@@ -636,15 +784,36 @@ export function WageScheduler({
                     {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month}월</option>)}
                   </select>
                 </div>
-                {monthlyStats.isSaved ? <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-800 bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-400"><Lock className="h-3 w-3" />확정 저장됨</div> : null}
+                {monthlyStats.isSaved ? (
+                  <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-800 bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-400">
+                    <Lock className="h-3 w-3" />
+                    확정 저장됨
+                  </div>
+                ) : null}
               </div>
-              {canEdit && !monthlyStats.isSaved ? <button type="button" onClick={saveMonthlySnapshot} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">이번 달 근무 확정</button> : null}
+
+              {canEdit ? (
+                monthlyStats.isSaved ? (
+                  <button type="button" onClick={cancelMonthlySnapshot} className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-xs text-red-400">
+                    확정 취소
+                  </button>
+                ) : (
+                  <button type="button" onClick={saveMonthlySnapshot} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">
+                    이번 달 근무 확정
+                  </button>
+                )
+              ) : null}
             </section>
 
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-slate-950 text-slate-400">
-                  <tr><th className="px-4 py-3">직원</th><th className="px-4 py-3 text-right">근무일수</th><th className="px-4 py-3 text-right">총 근무</th><th className="px-4 py-3 text-right">총 급여</th></tr>
+                  <tr>
+                    <th className="px-4 py-3">직원</th>
+                    <th className="px-4 py-3 text-right">근무일수</th>
+                    <th className="px-4 py-3 text-right">총 근무</th>
+                    <th className="px-4 py-3 text-right">총 급여</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {monthlyStats.staffStats.map((member) => (
@@ -664,12 +833,12 @@ export function WageScheduler({
                 <Calendar className="h-4 w-4 text-emerald-400" />
                 월별 상세 근무 일지
               </div>
+
               <div className="grid grid-cols-7 gap-2">
-                {DAYS.map((day) => (
-                  <div key={day} className="py-1 text-center text-xs text-slate-500">
-                    {day}
-                  </div>
+                {CALENDAR_DAYS.map((day) => (
+                  <div key={day} className="py-1 text-center text-xs text-slate-500">{day}</div>
                 ))}
+
                 {(() => {
                   const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
                   const firstDay = new Date(targetYear, targetMonth - 1, 1).getDay();
@@ -683,14 +852,24 @@ export function WageScheduler({
                   for (let date = 1; date <= daysInMonth; date += 1) {
                     const dateKey = `${targetYear}-${targetMonth}-${date}-${selectedMember?.id}`;
                     const log = currentMonthLogs[dateKey];
+                    const isOverridden = manualEdits[dateKey] !== undefined;
+
                     cells.push(
-                      <div key={date} className={`flex h-24 flex-col justify-between rounded-lg border p-2 ${log ? "border-slate-700 bg-slate-800" : "border-slate-800 bg-slate-950/40"}`}>
-                        <div className="text-[10px] text-slate-500">{date}</div>
+                      <div
+                        key={date}
+                        onClick={() => {
+                          if (!canEdit || monthlyStats.isSaved) return;
+                          startEditing(dateKey, log);
+                        }}
+                        className={`flex h-24 flex-col justify-between rounded-lg border p-2 ${log ? "border-slate-700 bg-slate-800 hover:border-emerald-500" : "border-slate-800 bg-slate-950/40 hover:border-slate-600"} ${editingDate === dateKey ? "ring-2 ring-emerald-500" : ""}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="text-[10px] text-slate-500">{date}</div>
+                          {isOverridden && !monthlyStats.isSaved ? <div className="h-2 w-2 rounded-full bg-orange-500" title="수동 수정됨" /> : null}
+                        </div>
                         {log ? (
                           <>
-                            <div className="text-[11px] font-semibold text-slate-200">
-                              {formatTime(log.startTime)} ~ {formatTime(log.endTime)}
-                            </div>
+                            <div className="text-[11px] font-semibold text-slate-200">{formatTime(log.startTime)} ~ {formatTime(log.endTime)}</div>
                             <div className="text-right text-[10px] text-orange-400">
                               {Math.round((((log.endTime - log.startTime) / 60) - log.breakHours) * (selectedMember?.targetWage || 0)).toLocaleString()}원
                             </div>
@@ -705,6 +884,42 @@ export function WageScheduler({
                   return cells;
                 })()}
               </div>
+
+              {editingDate ? (
+                <div className="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <label className="grid gap-1 text-xs text-slate-500">
+                    출근
+                    <input type="time" value={editForm.start} onChange={(event) => setEditForm((prev) => ({ ...prev, start: event.target.value }))} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200 outline-none" />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-500">
+                    퇴근
+                    <input type="time" value={editForm.end} onChange={(event) => setEditForm((prev) => ({ ...prev, end: event.target.value }))} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200 outline-none" />
+                  </label>
+                  <label className="grid gap-1 text-xs text-slate-500">
+                    휴게 시간
+                    <input type="number" step="0.5" value={editForm.break} onChange={(event) => setEditForm((prev) => ({ ...prev, break: event.target.value }))} className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200 outline-none" />
+                  </label>
+
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    {manualEdits[editingDate] ? (
+                      <button type="button" onClick={() => revertLog(editingDate)} className="inline-flex items-center gap-1 rounded-lg bg-blue-900/30 px-3 py-2 text-xs text-blue-400">
+                        <RotateCcw className="h-3 w-3" />
+                        스케줄 복구
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => deleteLog(editingDate)} className="rounded-lg bg-red-900/30 px-3 py-2 text-xs text-red-400">
+                      휴무 처리
+                    </button>
+                    <button type="button" onClick={() => setEditingDate(null)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300">
+                      취소
+                    </button>
+                    <button type="button" onClick={saveEditing} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">
+                      <Check className="h-3 w-3" />
+                      수정 완료
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </section>
           </div>
         ) : null}
@@ -724,5 +939,10 @@ function MetricCard({ label, value, helper }: { label: string; value: string; he
 }
 
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
-  return <span className="inline-flex items-center gap-2"><span className={`${color} ${line ? "h-[2px] w-4" : "h-3 w-3"} inline-block rounded-sm`} />{label}</span>;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className={`${color} ${line ? "h-[2px] w-4" : "h-3 w-3"} inline-block rounded-sm`} />
+      {label}
+    </span>
+  );
 }
