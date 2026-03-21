@@ -23,7 +23,7 @@ export default async function SchedulerPage() {
 
   return (
     <>
-      <div style={{ minHeight: "100vh", background: "#020617", padding: 24, paddingBottom: 0 }}>
+      <div style={{ background: "#020617", padding: 24, paddingBottom: 0 }}>
         <div style={{ maxWidth: 1280, margin: "0 auto" }}>
           <DashboardTabs current="/dashboard/scheduler" role={session.role} />
         </div>

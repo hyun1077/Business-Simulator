@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { DollarSign, TrendingDown, TrendingUp } from "lucide-react";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 import type { SystemRole } from "@/types/domain";
 
@@ -56,15 +57,17 @@ export function FinanceManager({
   const totalRevenue = useMemo(() => revenueItems.reduce((sum, item) => sum + item.amount, 0), [revenueItems]);
   const totalExpense = useMemo(() => expenseItems.reduce((sum, item) => sum + item.amount, 0), [expenseItems]);
   const profit = totalRevenue - totalExpense;
-  const topRevenue = [...revenueItems].sort((a, b) => b.amount - a.amount).slice(0, 5);
-  const topExpense = [...expenseItems].sort((a, b) => b.amount - a.amount).slice(0, 5);
+  const recentItems = useMemo(
+    () => [...filteredItems].sort((a, b) => b.targetDate.localeCompare(a.targetDate)).slice(0, 8),
+    [filteredItems],
+  );
   const categorySummary = useMemo(() => {
-    const bucket = new Map<string, number>();
+    const map = new Map<string, number>();
     filteredItems.forEach((item) => {
       const signed = item.type === "REVENUE" ? item.amount : -item.amount;
-      bucket.set(item.category, (bucket.get(item.category) ?? 0) + signed);
+      map.set(item.category, (map.get(item.category) ?? 0) + signed);
     });
-    return [...bucket.entries()]
+    return [...map.entries()]
       .map(([category, amount]) => ({ category, amount }))
       .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
   }, [filteredItems]);
@@ -82,6 +85,7 @@ export function FinanceManager({
         setError(result.message ?? "재무 항목 저장에 실패했습니다.");
         return;
       }
+
       setItems((prev) => [result.entry, ...prev]);
       setForm({
         type: "REVENUE",
@@ -101,9 +105,9 @@ export function FinanceManager({
 
         <div style={{ ...panelStyle, marginBottom: 16 }}>
           <div style={{ color: "#34d399", marginBottom: 8 }}>재무 관리 센터</div>
-          <h1 style={{ marginTop: 0, marginBottom: 8 }}>매출 · 지출 관리</h1>
+          <h1 style={{ marginTop: 0, marginBottom: 8 }}>매출과 지출을 한 번에 관리</h1>
           <p style={{ color: "#94a3b8", marginBottom: 0 }}>
-            매출과 지출을 기간별로 나눠 보고, 카테고리별 흐름까지 한 화면에서 확인할 수 있습니다.
+            기간별 손익, 카테고리 흐름, 최근 내역, 신규 입력을 한 화면 흐름으로 볼 수 있게 정리했습니다.
           </p>
         </div>
 
@@ -128,7 +132,7 @@ export function FinanceManager({
             ["overview", "요약"],
             ["revenue", "매출"],
             ["expense", "지출"],
-            ["entry", "새 항목"],
+            ["entry", "신규 입력"],
           ].map(([id, label]) => (
             <button key={id} onClick={() => setActiveTab(id as FinanceTab)} style={activeTab === id ? activeTabStyle : tabStyle}>
               {label}
@@ -139,58 +143,56 @@ export function FinanceManager({
         {activeTab === "overview" ? (
           <div style={{ display: "grid", gap: 16 }}>
             <section style={metricGridStyle}>
-              <MetricCard title="총매출" value={totalRevenue} color="#34d399" />
-              <MetricCard title="총지출" value={totalExpense} color="#f87171" />
-              <MetricCard title="순손익" value={profit} color={profit >= 0 ? "#60a5fa" : "#f87171"} />
+              <MetricCard icon={<TrendingUp size={18} />} title="총 매출" value={totalRevenue} color="#34d399" />
+              <MetricCard icon={<TrendingDown size={18} />} title="총 지출" value={totalExpense} color="#f87171" />
+              <MetricCard icon={<DollarSign size={18} />} title="순이익" value={profit} color={profit >= 0 ? "#60a5fa" : "#f87171"} />
             </section>
+
             <section style={twoColumnStyle}>
               <div style={panelStyle}>
-                <h2 style={headingStyle}>상위 매출 카테고리</h2>
-                <EntryList items={topRevenue} emptyLabel="매출 항목이 아직 없습니다." />
+                <h2 style={headingStyle}>카테고리 순효과</h2>
+                {categorySummary.length === 0 ? (
+                  <div style={{ color: "#64748b" }}>현재 기간에 집계된 카테고리 데이터가 없습니다.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {categorySummary.map((item) => (
+                      <div key={item.category} style={summaryRowStyle}>
+                        <strong>{item.category}</strong>
+                        <span style={{ color: item.amount >= 0 ? "#34d399" : "#f87171" }}>
+                          {item.amount >= 0 ? "+" : ""}
+                          {item.amount.toLocaleString()}원
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+
               <div style={panelStyle}>
-                <h2 style={headingStyle}>상위 지출 카테고리</h2>
-                <EntryList items={topExpense} emptyLabel="지출 항목이 아직 없습니다." />
+                <h2 style={headingStyle}>최근 내역</h2>
+                <EntryList items={recentItems} emptyLabel="최근 내역이 없습니다." />
               </div>
-            </section>
-            <section style={panelStyle}>
-              <h2 style={headingStyle}>카테고리 순효과</h2>
-              {categorySummary.length === 0 ? (
-                <div style={{ color: "#64748b" }}>현재 기간에 집계할 카테고리 데이터가 없습니다.</div>
-              ) : (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {categorySummary.map((item) => (
-                    <div key={item.category} style={summaryRowStyle}>
-                      <strong>{item.category}</strong>
-                      <span style={{ color: item.amount >= 0 ? "#34d399" : "#f87171" }}>
-                        {item.amount >= 0 ? "+" : ""}
-                        {item.amount.toLocaleString()}원
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </section>
           </div>
         ) : null}
 
         {activeTab === "revenue" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>매출 항목</h2>
-            <EntryList items={revenueItems} emptyLabel="매출 항목이 아직 없습니다." />
+            <h2 style={headingStyle}>매출 내역</h2>
+            <EntryList items={revenueItems} emptyLabel="매출 항목이 없습니다." />
           </section>
         ) : null}
 
         {activeTab === "expense" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>지출 항목</h2>
-            <EntryList items={expenseItems} emptyLabel="지출 항목이 아직 없습니다." />
+            <h2 style={headingStyle}>지출 내역</h2>
+            <EntryList items={expenseItems} emptyLabel="지출 항목이 없습니다." />
           </section>
         ) : null}
 
         {activeTab === "entry" ? (
           <section style={panelStyle}>
-            <h2 style={headingStyle}>새 재무 항목 추가</h2>
+            <h2 style={headingStyle}>재무 항목 추가</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as "REVENUE" | "EXPENSE" })} style={inputStyle}>
                 <option value="REVENUE">매출</option>
@@ -217,9 +219,20 @@ export function FinanceManager({
   );
 }
 
-function MetricCard({ title, value, color }: { title: string; value: number; color: string }) {
+function MetricCard({
+  icon,
+  title,
+  value,
+  color,
+}: {
+  icon: ReactNode;
+  title: string;
+  value: number;
+  color: string;
+}) {
   return (
     <div style={metricCardStyle}>
+      <div style={{ color, marginBottom: 10 }}>{icon}</div>
       <div style={{ color: "#94a3b8", marginBottom: 8 }}>{title}</div>
       <div style={{ color, fontSize: 28, fontWeight: 700 }}>{value.toLocaleString()}원</div>
     </div>
@@ -243,8 +256,8 @@ function EntryList({ items, emptyLabel }: { items: FinanceItem[]; emptyLabel: st
             </span>
           </div>
           <div style={{ color: "#94a3b8", marginTop: 8 }}>
-            {item.targetDate.slice(0, 10)}
-            {item.memo ? ` · ${item.memo}` : ""}
+            <span style={{ marginRight: 8 }}>{item.targetDate.slice(0, 10)}</span>
+            {item.memo ? `· ${item.memo}` : ""}
           </div>
         </div>
       ))}
