@@ -178,7 +178,7 @@ export function WageScheduler({
     [timeUnit],
   );
   const visibleSlots = useMemo(
-    () => activeSlots.filter((slot) => (showEarlyHours ? true : slot < 60 || slot >= 540)),
+    () => activeSlots.filter((slot) => (showEarlyHours ? true : slot >= 540)),
     [activeSlots, showEarlyHours],
   );
 
@@ -515,14 +515,19 @@ export function WageScheduler({
         </div>
 
         {tab === "schedule" ? (
-          <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-            <aside className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                  <Clock className="h-4 w-4 text-emerald-400" />
-                  시간 단위
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">주간 배정표</div>
+                  <div className="text-xs text-slate-400">표를 먼저 보고 바로 수정할 수 있도록 구조를 정리했습니다.</div>
                 </div>
-                <div className="flex gap-2">
+                {!canEdit ? <div className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-400">직원 계정은 읽기 전용입니다.</div> : null}
+              </div>
+
+              <div className="mb-4 flex flex-wrap gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-emerald-400" />
                   {[20, 30, 60].map((unit) => (
                     <button
                       key={unit}
@@ -534,31 +539,17 @@ export function WageScheduler({
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 flex items-center justify-between text-sm font-semibold">
-                  <span>표시 범위</span>
-                  <button type="button" onClick={() => setShowEarlyHours((prev) => !prev)} className="inline-flex items-center gap-1 text-xs text-slate-400">
-                    {showEarlyHours ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                    {showEarlyHours ? "새벽 접기" : "새벽 펼치기"}
-                  </button>
-                </div>
-                <p className="text-xs leading-5 text-slate-400">기본값은 오전 9시 이후만 보여주고, 필요하면 새벽 시간대까지 확장할 수 있습니다.</p>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                  <Users className="h-4 w-4 text-emerald-400" />
-                  직원 선택
-                </div>
-                <div className="grid gap-2">
+                <button type="button" onClick={() => setShowEarlyHours((prev) => !prev)} className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300">
+                  {showEarlyHours ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  {showEarlyHours ? "새벽 접기" : "새벽 펼치기"}
+                </button>
+                <div className="flex flex-wrap gap-2">
                   {staff.map((member) => (
                     <button
                       key={member.id}
                       type="button"
                       onClick={() => setSelectedStaffId(member.id)}
-                      className={`flex items-center gap-2 rounded-full border px-3 py-2 text-left text-sm ${
+                      className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${
                         selectedStaffId === member.id ? "border-emerald-500 bg-slate-800 text-white" : "border-slate-700 bg-slate-900 text-slate-300"
                       }`}
                     >
@@ -567,33 +558,6 @@ export function WageScheduler({
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <div className="mb-3 text-sm font-semibold">주간 요약</div>
-                <div className="grid gap-2">
-                  {weeklySummary.map((item) => (
-                    <div key={item.staffId} className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
-                      <div className="flex items-center justify-between text-sm font-medium">
-                        <span>{item.staffName}</span>
-                        <span className="text-emerald-400">{item.weeklyNet.toFixed(1)}h</span>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-400">
-                        주급 {item.workPayWeekly.toLocaleString()}원 · 월 예상 {item.monthlyTotalPay.toLocaleString()}원
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
-
-            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold">주간 배정표</div>
-                  <div className="text-xs text-slate-400">원본처럼 20분, 30분, 1시간 단위로 바꾸면 표도 즉시 다시 계산됩니다.</div>
-                </div>
-                {!canEdit ? <div className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-400">직원 계정은 읽기 전용입니다.</div> : null}
               </div>
 
               <div className="h-[700px] overflow-auto rounded-xl border border-slate-800">
@@ -661,6 +625,32 @@ export function WageScheduler({
                 </table>
               </div>
             </section>
+
+            <aside className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-2 text-sm font-semibold">현재 보기</div>
+                <p className="text-xs leading-5 text-slate-400">
+                  기본값은 오전 9시 이후만 표시합니다. 필요하면 새벽 시간도 펼쳐서 확인할 수 있습니다.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-3 text-sm font-semibold">주간 요약</div>
+                <div className="grid gap-2">
+                  {weeklySummary.map((item) => (
+                    <div key={item.staffId} className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
+                      <div className="flex items-center justify-between text-sm font-medium">
+                        <span>{item.staffName}</span>
+                        <span className="text-emerald-400">{item.weeklyNet.toFixed(1)}h</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        주급 {item.workPayWeekly.toLocaleString()}원 · 월 예상 {item.monthlyTotalPay.toLocaleString()}원
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
           </div>
         ) : null}
 
