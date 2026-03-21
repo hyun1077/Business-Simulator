@@ -12,9 +12,16 @@ const COLOR_FALLBACKS: Record<string, string> = { "bg-red-500": "#ef4444", "bg-o
 type TabId = "schedule" | "analysis" | "summary";
 type ScheduleShape = Record<string, Record<number, string[]>>;
 type Pattern = { id: string; name: string; data: Record<number, number> };
+type SeasonProfile = {
+  id: string;
+  name: string;
+  dayTypes: Record<string, "NORMAL" | "PEAK">;
+  normalHourlyProjection: Record<number, number>;
+  peakHourlyProjection: Record<number, number>;
+};
 type MonthlyLog = { startTime: number; endTime: number; breakHours: number };
 type Snapshot = { isSaved: boolean; staffSnapshot: Staff[]; dailyLogs: Record<string, MonthlyLog> };
-type Staff = { id: string; name: string; color: string; baseWage: number; targetWage: number; holidayWage: number; bonusWage: number; capacity: number; incentive: number };
+type Staff = { id: string; name: string; color: string; baseWage: number; targetWage: number; holidayWage: number; bonusWage: number; capacity: number; incentive: number; expectedSales?: number; performanceBonus?: number; mealAllowance?: number; transportAllowance?: number; otherAllowance?: number; employmentType?: "HOURLY" | "MONTHLY"; monthlySalary?: number; expectedMonthlyHours?: number; insuranceType?: "NONE" | "FREELANCER" | "FOUR_INSURANCE"; insuranceRate?: number };
 type FinanceItem = { id: string; type: "REVENUE" | "EXPENSE"; category: string; amount: number; memo?: string | null };
 type EditForm = { start: string; end: string; break: number | string };
 
@@ -22,6 +29,23 @@ const DEFAULT_PATTERNS: Pattern[] = [
   { id: "p1", name: "평일 (학기중)", data: createHourlyPattern(300000, 400000, 100000, 11, 13, 18, 20, 9, 22) },
   { id: "p2", name: "금요일/주말 (피크)", data: createHourlyPattern(500000, 800000, 200000, 11, 13, 17, 22, 9, 23) },
   { id: "p3", name: "방학 기간 (비수기)", data: createHourlyPattern(200000, 250000, 80000, 11, 13, 18, 20, 10, 21) },
+];
+
+const DEFAULT_SEASON_PROFILES: SeasonProfile[] = [
+  {
+    id: "semester",
+    name: "학기중",
+    dayTypes: { 월: "NORMAL", 화: "NORMAL", 수: "NORMAL", 목: "NORMAL", 금: "PEAK", 토: "PEAK", 일: "PEAK" },
+    normalHourlyProjection: { ...DEFAULT_PATTERNS[0].data },
+    peakHourlyProjection: { ...DEFAULT_PATTERNS[1].data },
+  },
+  {
+    id: "vacation",
+    name: "방학기간",
+    dayTypes: { 월: "NORMAL", 화: "NORMAL", 수: "NORMAL", 목: "NORMAL", 금: "PEAK", 토: "PEAK", 일: "PEAK" },
+    normalHourlyProjection: { ...DEFAULT_PATTERNS[2].data },
+    peakHourlyProjection: { ...DEFAULT_PATTERNS[1].data },
+  },
 ];
 
 function createHourlyPattern(lunch: number, dinner: number, normal: number, lunchStart: number, lunchEnd: number, dinnerStart: number, dinnerEnd: number, open: number, close: number) {
@@ -33,6 +57,16 @@ function formatTime(minutes: number | null | undefined) { if (minutes === null |
 function calcBreakHours(grossHours: number) { if (grossHours > 8) return 1; if (grossHours > 4) return 0.5; return 0; }
 function sum(values: number[]) { return values.reduce((acc, value) => acc + (Number(value) || 0), 0); }
 function resolveColor(color: string | undefined) { if (!color) return "#10b981"; if (color.startsWith("#") || color.startsWith("rgb") || color.startsWith("hsl")) return color; return COLOR_FALLBACKS[color] ?? "#38bdf8"; }
+function buildSeasonAverageProjection(profile: SeasonProfile) {
+  const normalDays = SCHEDULE_DAYS.filter((day) => profile.dayTypes[day] !== "PEAK").length;
+  const peakDays = SCHEDULE_DAYS.filter((day) => profile.dayTypes[day] === "PEAK").length;
+  return Object.fromEntries(
+    Array.from({ length: 24 }, (_, hour) => {
+      const total = (profile.normalHourlyProjection[hour] || 0) * normalDays + (profile.peakHourlyProjection[hour] || 0) * peakDays;
+      return [hour, Math.round(total / 7)];
+    }),
+  ) as Record<number, number>;
+}
 function buildWeeklyStaffSummary(staffList: Staff[], schedule: ScheduleShape, timeUnit: number, activeSlots: number[]) {
   const hourRatio = timeUnit / 60;
   return staffList.map((member) => {
@@ -57,6 +91,8 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
   const [patterns, setPatterns] = useState<Pattern[]>(DEFAULT_PATTERNS);
   const [selectedPatternId, setSelectedPatternId] = useState(DEFAULT_PATTERNS[0].id);
   const [newPatternName, setNewPatternName] = useState("");
+  const [seasonProfiles, setSeasonProfiles] = useState<SeasonProfile[]>(DEFAULT_SEASON_PROFILES);
+  const [activeSeasonProfileId, setActiveSeasonProfileId] = useState(DEFAULT_SEASON_PROFILES[0].id);
   const [hourlySalesProjection, setHourlySalesProjection] = useState<Record<number, number>>({ ...DEFAULT_PATTERNS[0].data });
   const [targetYear, setTargetYear] = useState(TODAY.getFullYear());
   const [targetMonth, setTargetMonth] = useState(TODAY.getMonth() + 1);
@@ -70,6 +106,10 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
   const visibleSlots = useMemo(() => activeSlots.filter((slot) => (showEarlyHours ? true : slot >= 540)), [activeSlots, showEarlyHours]);
   const selectedStaff = useMemo(() => staff.find((member) => member.id === selectedStaffId) ?? staff[0] ?? null, [selectedStaffId, staff]);
   const weeklySummary = useMemo(() => buildWeeklyStaffSummary(staff, schedule, timeUnit, activeSlots), [staff, schedule, timeUnit, activeSlots]);
+  const activeSeasonProfile = useMemo(
+    () => seasonProfiles.find((profile) => profile.id === activeSeasonProfileId) ?? seasonProfiles[0] ?? null,
+    [activeSeasonProfileId, seasonProfiles],
+  );
   const totalRevenue = useMemo(() => sum(financeItems.filter((item) => item.type === "REVENUE").map((item) => item.amount)), [financeItems]);
   const totalExpense = useMemo(() => sum(financeItems.filter((item) => item.type === "EXPENSE").map((item) => item.amount)), [financeItems]);
   const assignedSlotCount = useMemo(() => Object.values(schedule).reduce((acc, slots) => acc + Object.values(slots).filter((ids) => ids.length > 0).length, 0), [schedule]);
@@ -87,7 +127,18 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
         if (result.schedule) {
           setSchedule(mergeSchedule(result.schedule.assignments));
           setTimeUnit(result.schedule.timeUnit ?? 20);
-          setHourlySalesProjection({ ...DEFAULT_PATTERNS[0].data, ...(result.schedule.hourlySalesProjection ?? {}) });
+          const loadedSeasonProfiles =
+            Array.isArray(result.schedule.seasonProfiles) && result.schedule.seasonProfiles.length > 0
+              ? result.schedule.seasonProfiles
+              : DEFAULT_SEASON_PROFILES;
+          const loadedSeasonId =
+            result.schedule.activeSeasonProfileId ??
+            loadedSeasonProfiles[0]?.id ??
+            DEFAULT_SEASON_PROFILES[0].id;
+          setSeasonProfiles(loadedSeasonProfiles);
+          setActiveSeasonProfileId(loadedSeasonId);
+          const activeProfile = loadedSeasonProfiles.find((profile: SeasonProfile) => profile.id === loadedSeasonId) ?? loadedSeasonProfiles[0];
+          setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(result.schedule.hourlySalesProjection ?? {}) });
         } else {
           setSchedule(createInitialSchedule());
         }
@@ -119,7 +170,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     setSaving(true);
     setSaveMessage("");
     try {
-      const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule }) });
+      const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule, seasonProfiles, activeSeasonProfileId }) });
       const result = await response.json();
       setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
     } catch {
@@ -153,6 +204,58 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
       setSelectedPatternId(DEFAULT_PATTERNS[0].id);
       setHourlySalesProjection({ ...DEFAULT_PATTERNS[0].data });
     }
+  }
+
+  function selectSeasonProfile(profileId: string) {
+    const profile = seasonProfiles.find((item) => item.id === profileId);
+    if (!profile) return;
+    setActiveSeasonProfileId(profileId);
+    setHourlySalesProjection(buildSeasonAverageProjection(profile));
+  }
+
+  function addSeasonProfile() {
+    const nextProfile: SeasonProfile = {
+      id: `season-${Date.now()}`,
+      name: `새 시즌 ${seasonProfiles.length + 1}`,
+      dayTypes: { 월: "NORMAL", 화: "NORMAL", 수: "NORMAL", 목: "NORMAL", 금: "PEAK", 토: "PEAK", 일: "PEAK" },
+      normalHourlyProjection: { ...(activeSeasonProfile?.normalHourlyProjection ?? DEFAULT_PATTERNS[0].data) },
+      peakHourlyProjection: { ...(activeSeasonProfile?.peakHourlyProjection ?? DEFAULT_PATTERNS[1].data) },
+    };
+    setSeasonProfiles((prev) => [...prev, nextProfile]);
+    setActiveSeasonProfileId(nextProfile.id);
+    setHourlySalesProjection(buildSeasonAverageProjection(nextProfile));
+  }
+
+  function updateSeasonProfile(patch: Partial<SeasonProfile>) {
+    if (!activeSeasonProfile) return;
+    const nextProfiles = seasonProfiles.map((profile) => {
+      if (profile.id !== activeSeasonProfile.id) return profile;
+      return { ...profile, ...patch };
+    });
+    setSeasonProfiles(nextProfiles);
+    const nextActive = nextProfiles.find((profile) => profile.id === activeSeasonProfile.id);
+    if (nextActive) setHourlySalesProjection(buildSeasonAverageProjection(nextActive));
+  }
+
+  function updateSeasonDay(day: string) {
+    if (!activeSeasonProfile) return;
+    const current = activeSeasonProfile.dayTypes[day] === "PEAK" ? "PEAK" : "NORMAL";
+    updateSeasonProfile({
+      dayTypes: {
+        ...activeSeasonProfile.dayTypes,
+        [day]: current === "PEAK" ? "NORMAL" : "PEAK",
+      },
+    });
+  }
+
+  function updateSeasonHourly(kind: "normalHourlyProjection" | "peakHourlyProjection", hour: number, value: number) {
+    if (!activeSeasonProfile) return;
+    updateSeasonProfile({
+      [kind]: {
+        ...activeSeasonProfile[kind],
+        [hour]: value,
+      },
+    });
   }
 
   function generateDefaultLogsForMonth(year: number, month: number) {
@@ -222,7 +325,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
           const member = staff.find((item) => item.id === staffId);
           if (!member) return;
           laborCost += member.targetWage * (timeUnit / 60) / 7;
-          capacity += member.capacity * (timeUnit / 60) / 7;
+          capacity += (member.expectedSales ?? member.capacity) * (timeUnit / 60) / 7;
         });
       });
     });
@@ -381,14 +484,31 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
           <div className={styles.analysisLayout}>
             <section style={{ display: "grid", gap: 16 }}>
               <div className={styles.panel}>
-                <div className={styles.toolbarTitle} style={{ fontSize: 18 }}><FolderOpen size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />매출 패턴 불러오기</div>
+                <div className={styles.toolbarTitle} style={{ fontSize: 18 }}><FolderOpen size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />시즌별 매출 패턴 설정</div>
                 <div style={{ display: "grid", gap: 12 }}>
-                  <select value={selectedPatternId} onChange={(event) => loadPattern(event.target.value)} className={styles.select}>{patterns.map((pattern) => <option key={pattern.id} value={pattern.id}>{pattern.name}</option>)}</select>
-                  <input value={newPatternName} onChange={(event) => setNewPatternName(event.target.value)} className={styles.field} placeholder="예: 금요일 피크" />
                   <div className={styles.chipRow}>
-                    <button type="button" onClick={saveCurrentAsPattern} className={styles.primaryButton}>패턴 저장</button>
-                    {selectedPatternId.startsWith("custom-") ? <button type="button" onClick={() => deletePattern(selectedPatternId)} className={styles.dangerButton}>사용자 패턴 삭제</button> : null}
+                    <select value={activeSeasonProfileId} onChange={(event) => selectSeasonProfile(event.target.value)} className={styles.select}>{seasonProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
+                    <button type="button" onClick={addSeasonProfile} className={styles.secondaryButton}>시즌 추가</button>
                   </div>
+                  {activeSeasonProfile ? (
+                    <>
+                      <input value={activeSeasonProfile.name} onChange={(event) => updateSeasonProfile({ name: event.target.value })} className={styles.field} placeholder="예: 학기중, 방학기간" />
+                      <div>
+                        <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 8 }}>요일 그룹 설정</div>
+                        <div className={styles.chipRow}>
+                          {SCHEDULE_DAYS.map((day) => <button key={day} type="button" onClick={() => updateSeasonDay(day)} className={`${styles.chipButton} ${activeSeasonProfile.dayTypes[day] === "PEAK" ? styles.chipActive : ""}`}>{day} · {activeSeasonProfile.dayTypes[day] === "PEAK" ? "피크" : "일반"}</button>)}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 8 }}>일반일 시간대 매출</div>
+                        <div className={styles.analysisInputs}>{Array.from({ length: 24 }, (_, hour) => <label key={`normal-${hour}`} style={{ display: "grid", gap: 4 }}><span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span><input type="number" value={activeSeasonProfile.normalHourlyProjection[hour] || 0} onChange={(event) => updateSeasonHourly("normalHourlyProjection", hour, Number(event.target.value))} className={styles.field} style={{ padding: "8px 6px", textAlign: "center", fontSize: 12 }} /></label>)}</div>
+                      </div>
+                      <div>
+                        <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 8 }}>피크일 시간대 매출</div>
+                        <div className={styles.analysisInputs}>{Array.from({ length: 24 }, (_, hour) => <label key={`peak-${hour}`} style={{ display: "grid", gap: 4 }}><span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span><input type="number" value={activeSeasonProfile.peakHourlyProjection[hour] || 0} onChange={(event) => updateSeasonHourly("peakHourlyProjection", hour, Number(event.target.value))} className={styles.field} style={{ padding: "8px 6px", textAlign: "center", fontSize: 12 }} /></label>)}</div>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
               <div className={styles.panel}><div className={styles.toolbarTitle} style={{ fontSize: 18 }}><Store size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />월 손익 요약</div><div style={{ display: "grid", gap: 12, fontSize: 15 }}><SummaryRow label="총 매출" value={`${totalRevenue.toLocaleString()}원`} color="#34d399" /><SummaryRow label="총 지출" value={`-${totalExpense.toLocaleString()}원`} color="#f87171" /><SummaryRow label="예상 인건비" value={`-${monthlyStats.totalLabor.toLocaleString()}원`} color="#fb923c" /><SummaryRow label="예상 순이익" value={`${monthlyProfit.toLocaleString()}원`} color={monthlyProfit >= 0 ? "#34d399" : "#f87171"} strong /></div></div>
@@ -401,7 +521,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
                   <label style={{ color: "#94a3b8", fontSize: 13 }}>영업 종료<input type="number" min="0" max="23" value={businessHours.end} onChange={(event) => setBusinessHours((prev) => ({ ...prev, end: Number(event.target.value) }))} className={styles.timeInput} style={{ width: 76, marginLeft: 8 }} /></label>
                 </div>
               </div>
-              <div className={styles.hintRow}><div className={styles.chipRow}><Legend color="#3b82f6" label="매출" /><Legend color="#ef4444" label="인건비" /><Legend color="#10b981" label="처리 용량" line /></div><span>현재 시간 단위 {timeUnit}분</span></div>
+              <div className={styles.hintRow}><div className={styles.chipRow}><Legend color="#3b82f6" label="매출" /><Legend color="#ef4444" label="인건비" /><Legend color="#10b981" label="직원 기대매출" line /></div><span>현재 시간 단위 {timeUnit}분</span></div>
               <div className={styles.analysisChart}>
                 {hourlyChartData.map((item) => {
                   const salesHeight = Math.min((item.sales / chartMax) * 100, 100);
@@ -410,11 +530,11 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
                   const overload = item.sales > item.capacity && item.capacity > 0;
                   const idle = item.sales < item.capacity * 0.3 && item.laborCost > 0;
                   const inBusiness = item.hour >= businessHours.start && item.hour <= businessHours.end;
-                  return <div key={item.hour} className={styles.chartHour} style={{ opacity: inBusiness ? 1 : 0.34 }} title={`매출 ${item.sales.toLocaleString()}원 / 인건비 ${Math.round(item.laborCost).toLocaleString()}원 / Capa ${Math.round(item.capacity).toLocaleString()}원`}><div style={{ minHeight: 18 }}>{inBusiness && overload ? <AlertTriangle size={14} color="#ef4444" /> : null}{inBusiness && !overload && idle ? <TrendingDown size={14} color="#fb923c" /> : null}</div><div className={styles.barWrap}><div className={styles.capacityLine} style={{ bottom: `${capacityHeight}%` }} /><div className={styles.bar} style={{ height: `${salesHeight}%`, background: "#3b82f6" }} /><div className={styles.bar} style={{ height: `${laborHeight}%`, background: "#ef4444" }} /></div><div style={{ fontSize: 11, color: "#94a3b8" }}>{item.hour}시</div></div>;
+                  return <div key={item.hour} className={styles.chartHour} style={{ opacity: inBusiness ? 1 : 0.34 }} title={`매출 ${item.sales.toLocaleString()}원 / 인건비 ${Math.round(item.laborCost).toLocaleString()}원 / 직원 기대매출 ${Math.round(item.capacity).toLocaleString()}원`}><div style={{ minHeight: 18 }}>{inBusiness && overload ? <AlertTriangle size={14} color="#ef4444" /> : null}{inBusiness && !overload && idle ? <TrendingDown size={14} color="#fb923c" /> : null}</div><div className={styles.barWrap}><div className={styles.capacityLine} style={{ bottom: `${capacityHeight}%` }} /><div className={styles.bar} style={{ height: `${salesHeight}%`, background: "#3b82f6" }} /><div className={styles.bar} style={{ height: `${laborHeight}%`, background: "#ef4444" }} /></div><div style={{ fontSize: 11, color: "#94a3b8" }}>{item.hour}시</div></div>;
                 })}
               </div>
-              <div style={{ marginBottom: 10, color: "#94a3b8", fontSize: 13 }}>시간대별 예상 매출 입력</div>
-              <div className={styles.analysisInputs}>{Array.from({ length: 24 }, (_, hour) => <label key={hour} style={{ display: "grid", gap: 4 }}><span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span><input type="number" value={hourlySalesProjection[hour] || 0} onChange={(event) => setHourlySalesProjection((prev) => ({ ...prev, [hour]: Number(event.target.value) }))} className={styles.field} style={{ padding: "8px 6px", textAlign: "center", fontSize: 12 }} /></label>)}</div>
+              <div style={{ marginBottom: 10, color: "#94a3b8", fontSize: 13 }}>현재 시즌 평균 시간대 매출</div>
+              <div className={styles.analysisInputs}>{Array.from({ length: 24 }, (_, hour) => <label key={hour} style={{ display: "grid", gap: 4 }}><span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span><input type="number" value={hourlySalesProjection[hour] || 0} readOnly className={styles.field} style={{ padding: "8px 6px", textAlign: "center", fontSize: 12, opacity: 0.72 }} /></label>)}</div>
             </section>
           </div>
         ) : null}

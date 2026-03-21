@@ -15,8 +15,15 @@ export default async function DashboardPage() {
   const storeFinance = data.finance.filter((item) => item.storeId === store.id);
   const storeStaff = data.staff.filter((item) => item.storeId === store.id);
   const revenue = storeFinance.filter((item) => item.type === "REVENUE").reduce((sum, item) => sum + item.amount, 0);
-  const expense = storeFinance.filter((item) => item.type === "EXPENSE").reduce((sum, item) => sum + item.amount, 0);
-  const laborCost = storeStaff.reduce((sum, item) => sum + item.targetWage * 160 + item.incentive, 0);
+  const expense = storeFinance
+    .filter((item) => item.type === "EXPENSE")
+    .reduce((sum, item) => sum + (item.inputMode === "RATIO" ? Math.round(revenue * ((item.ratioPercent ?? 0) / 100)) : item.amount), 0);
+  const laborCost = storeStaff.reduce((sum, item) => {
+    const hours = item.expectedMonthlyHours || 160;
+    const payroll = item.employmentType === "MONTHLY" && item.monthlySalary > 0 ? item.monthlySalary : item.targetWage * hours;
+    const extra = item.mealAllowance + item.transportAllowance + item.otherAllowance + item.performanceBonus;
+    return sum + Math.round((payroll + extra) * (1 + item.insuranceRate / 100));
+  }, 0);
   const profit = revenue - expense - laborCost;
 
   return (

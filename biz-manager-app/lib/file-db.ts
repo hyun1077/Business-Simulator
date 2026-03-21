@@ -25,6 +25,9 @@ export type AppStore = {
   name: string;
   businessType: string;
   ownerUserId: string | null;
+  expectedProfitMarginRate?: number;
+  estimatedTaxRate?: number;
+  expectedMonthlyRevenue?: number;
 };
 
 export type AppStaff = {
@@ -38,6 +41,16 @@ export type AppStaff = {
   bonusWage: number;
   capacity: number;
   incentive: number;
+  expectedSales: number;
+  performanceBonus: number;
+  mealAllowance: number;
+  transportAllowance: number;
+  otherAllowance: number;
+  employmentType: "HOURLY" | "MONTHLY";
+  monthlySalary: number;
+  expectedMonthlyHours: number;
+  insuranceType: "NONE" | "FREELANCER" | "FOUR_INSURANCE";
+  insuranceRate: number;
 };
 
 export type AppFinance = {
@@ -48,6 +61,8 @@ export type AppFinance = {
   amount: number;
   memo: string | null;
   targetDate: string;
+  inputMode: "AMOUNT" | "RATIO";
+  ratioPercent: number | null;
 };
 
 export type AppSchedule = {
@@ -55,6 +70,14 @@ export type AppSchedule = {
   timeUnit: number;
   hourlySalesProjection: Record<number, number>;
   assignments: Record<string, Record<number, string[]>>;
+  seasonProfiles?: Array<{
+    id: string;
+    name: string;
+    dayTypes: Record<string, "NORMAL" | "PEAK">;
+    normalHourlyProjection: Record<number, number>;
+    peakHourlyProjection: Record<number, number>;
+  }>;
+  activeSeasonProfileId?: string | null;
 };
 
 type AppData = {
@@ -87,11 +110,57 @@ async function ensureDataFile() {
 function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
   return {
     users: Array.isArray(raw?.users) ? raw.users : [],
-    stores: Array.isArray(raw?.stores) ? raw.stores : [],
+    stores: Array.isArray(raw?.stores)
+      ? raw.stores.map((store) => ({
+          ...store,
+          expectedProfitMarginRate: Number(store.expectedProfitMarginRate) || 25,
+          estimatedTaxRate: Number(store.estimatedTaxRate) || 10,
+          expectedMonthlyRevenue: Number(store.expectedMonthlyRevenue) || 0,
+        }))
+      : [],
     memberships: Array.isArray(raw?.memberships) ? raw.memberships : [],
-    staff: Array.isArray(raw?.staff) ? raw.staff : [],
-    finance: Array.isArray(raw?.finance) ? raw.finance : [],
-    schedules: Array.isArray(raw?.schedules) ? raw.schedules : [],
+    staff: Array.isArray(raw?.staff)
+      ? raw.staff.map((member) => {
+          const performanceBonus = Number((member as Partial<AppStaff>).performanceBonus) || Number(member.incentive) || 0;
+          const expectedSales = Number((member as Partial<AppStaff>).expectedSales) || Number(member.capacity) || 0;
+          return {
+            ...member,
+            incentive: performanceBonus,
+            performanceBonus,
+            capacity: expectedSales,
+            expectedSales,
+            mealAllowance: Number((member as Partial<AppStaff>).mealAllowance) || 0,
+            transportAllowance: Number((member as Partial<AppStaff>).transportAllowance) || 0,
+            otherAllowance: Number((member as Partial<AppStaff>).otherAllowance) || 0,
+            employmentType: (member as Partial<AppStaff>).employmentType === "MONTHLY" ? "MONTHLY" : "HOURLY",
+            monthlySalary: Number((member as Partial<AppStaff>).monthlySalary) || 0,
+            expectedMonthlyHours: Number((member as Partial<AppStaff>).expectedMonthlyHours) || 160,
+            insuranceType:
+              (member as Partial<AppStaff>).insuranceType === "FREELANCER" ||
+              (member as Partial<AppStaff>).insuranceType === "FOUR_INSURANCE"
+                ? ((member as Partial<AppStaff>).insuranceType as "FREELANCER" | "FOUR_INSURANCE")
+                : "NONE",
+            insuranceRate: Number((member as Partial<AppStaff>).insuranceRate) || 0,
+          };
+        })
+      : [],
+    finance: Array.isArray(raw?.finance)
+      ? raw.finance.map((item) => ({
+          ...item,
+          inputMode: (item as Partial<AppFinance>).inputMode === "RATIO" ? "RATIO" : "AMOUNT",
+          ratioPercent:
+            (item as Partial<AppFinance>).inputMode === "RATIO"
+              ? Number((item as Partial<AppFinance>).ratioPercent) || 0
+              : Number((item as Partial<AppFinance>).ratioPercent) || null,
+        }))
+      : [],
+    schedules: Array.isArray(raw?.schedules)
+      ? raw.schedules.map((schedule) => ({
+          ...schedule,
+          seasonProfiles: Array.isArray(schedule.seasonProfiles) ? schedule.seasonProfiles : [],
+          activeSeasonProfileId: schedule.activeSeasonProfileId ?? null,
+        }))
+      : [],
   };
 }
 

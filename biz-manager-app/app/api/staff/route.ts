@@ -8,8 +8,16 @@ const bodySchema = z.object({
   color: z.string().min(1),
   baseWage: z.number().int().min(0),
   targetWage: z.number().int().min(0),
-  capacity: z.number().int().min(0),
-  incentive: z.number().int().min(0),
+  expectedSales: z.number().int().min(0),
+  performanceBonus: z.number().int().min(0),
+  mealAllowance: z.number().int().min(0),
+  transportAllowance: z.number().int().min(0),
+  otherAllowance: z.number().int().min(0),
+  employmentType: z.enum(["HOURLY", "MONTHLY"]),
+  monthlySalary: z.number().int().min(0),
+  expectedMonthlyHours: z.number().int().min(1),
+  insuranceType: z.enum(["NONE", "FREELANCER", "FOUR_INSURANCE"]),
+  insuranceRate: z.number().min(0).max(100),
 });
 
 export async function GET() {
@@ -31,6 +39,8 @@ export async function POST(request: Request) {
     id: createId(),
     storeId: session.storeId,
     ...body,
+    capacity: body.expectedSales,
+    incentive: body.performanceBonus,
     holidayWage,
     bonusWage,
   };

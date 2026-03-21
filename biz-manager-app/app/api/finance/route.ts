@@ -7,6 +7,8 @@ const bodySchema = z.object({
   type: z.enum(["REVENUE", "EXPENSE"]),
   category: z.string().min(1),
   amount: z.number().int().min(0),
+  inputMode: z.enum(["AMOUNT", "RATIO"]).default("AMOUNT"),
+  ratioPercent: z.number().min(0).max(100).nullable().optional(),
   memo: z.string().optional(),
   targetDate: z.string().min(8),
 });
@@ -31,6 +33,8 @@ export async function POST(request: Request) {
     type: body.type,
     category: body.category,
     amount: body.amount,
+    inputMode: body.inputMode,
+    ratioPercent: body.inputMode === "RATIO" ? Number(body.ratioPercent) || 0 : null,
     memo: body.memo || null,
     targetDate: body.targetDate,
   };

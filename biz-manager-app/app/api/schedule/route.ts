@@ -7,6 +7,18 @@ const bodySchema = z.object({
   timeUnit: z.number().int().positive(),
   hourlySalesProjection: z.record(z.string(), z.number().int().min(0)),
   assignments: z.record(z.string(), z.record(z.string(), z.array(z.string()))),
+  seasonProfiles: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        dayTypes: z.record(z.string(), z.enum(["NORMAL", "PEAK"])),
+        normalHourlyProjection: z.record(z.string(), z.number().int().min(0)),
+        peakHourlyProjection: z.record(z.string(), z.number().int().min(0)),
+      }),
+    )
+    .optional(),
+  activeSeasonProfileId: z.string().nullable().optional(),
 });
 
 export async function GET() {
@@ -36,6 +48,16 @@ export async function POST(request: Request) {
         Object.fromEntries(Object.entries(slots).map(([time, staffIds]) => [Number(time), staffIds])),
       ]),
     ) as Record<string, Record<number, string[]>>,
+    seasonProfiles: (body.seasonProfiles ?? []).map((profile) => ({
+      ...profile,
+      normalHourlyProjection: Object.fromEntries(
+        Object.entries(profile.normalHourlyProjection).map(([key, value]) => [Number(key), value]),
+      ) as Record<number, number>,
+      peakHourlyProjection: Object.fromEntries(
+        Object.entries(profile.peakHourlyProjection).map(([key, value]) => [Number(key), value]),
+      ) as Record<number, number>,
+    })),
+    activeSeasonProfileId: body.activeSeasonProfileId ?? null,
   };
 
   const index = data.schedules.findIndex((item) => item.storeId === session.storeId);

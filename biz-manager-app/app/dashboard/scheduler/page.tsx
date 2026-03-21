@@ -18,6 +18,16 @@ export default async function SchedulerPage() {
       bonusWage: item.bonusWage,
       capacity: item.capacity,
       incentive: item.incentive,
+      expectedSales: item.expectedSales,
+      performanceBonus: item.performanceBonus,
+      mealAllowance: item.mealAllowance,
+      transportAllowance: item.transportAllowance,
+      otherAllowance: item.otherAllowance,
+      employmentType: item.employmentType,
+      monthlySalary: item.monthlySalary,
+      expectedMonthlyHours: item.expectedMonthlyHours,
+      insuranceType: item.insuranceType,
+      insuranceRate: item.insuranceRate,
     }));
   const financeItems = data.finance.filter((item) => item.storeId === session.storeId);
 
