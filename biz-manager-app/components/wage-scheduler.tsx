@@ -1,368 +1,728 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Activity, Save, TrendingDown, TrendingUp, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  FolderOpen,
+  Lock,
+  PieChart,
+  Save,
+  Store,
+  TrendingDown,
+  Users,
+} from "lucide-react";
 
-const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
+const DAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const WORK_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+type SchedulerTab = "schedule" | "analysis" | "summary";
+type ScheduleShape = Record<string, Record<number, string[]>>;
+type MonthlyLog = { startTime: number; endTime: number; breakHours: number };
+type Snapshot = { isSaved: boolean; staffSnapshot: Staff[]; dailyLogs: Record<string, MonthlyLog> };
 
 type Staff = {
   id: string;
   name: string;
   color: string;
+  baseWage: number;
   targetWage: number;
+  holidayWage: number;
+  bonusWage: number;
   capacity: number;
+  incentive: number;
 };
 
-type ScheduleShape = Record<string, Record<number, string[]>>;
+type FinanceItem = {
+  id: string;
+  type: "REVENUE" | "EXPENSE";
+  category: string;
+  amount: number;
+  memo?: string | null;
+};
 
-const createInitialSchedule = (): ScheduleShape =>
-  Object.fromEntries(DAYS.map((day) => [day, {} as Record<number, string[]>]));
+const DEFAULT_PATTERNS = [
+  { id: "p1", name: "평일 (학기중)", data: hourlyPattern(300000, 400000, 100000, 11, 13, 18, 20, 9, 22) },
+  { id: "p2", name: "금요일/주말 (피크)", data: hourlyPattern(500000, 800000, 200000, 11, 13, 17, 22, 9, 23) },
+  { id: "p3", name: "방학 기간 (비수기)", data: hourlyPattern(200000, 250000, 80000, 11, 13, 18, 20, 10, 21) },
+];
 
-const formatTime = (minutes: number) =>
-  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+function hourlyPattern(
+  lunch: number,
+  dinner: number,
+  normal: number,
+  lunchStart: number,
+  lunchEnd: number,
+  dinnerStart: number,
+  dinnerEnd: number,
+  open: number,
+  close: number,
+) {
+  return Object.fromEntries(
+    Array.from({ length: 24 }, (_, hour) => [
+      hour,
+      hour >= lunchStart && hour <= lunchEnd
+        ? lunch
+        : hour >= dinnerStart && hour <= dinnerEnd
+          ? dinner
+          : hour >= open && hour <= close
+            ? normal
+            : 0,
+    ]),
+  ) as Record<number, number>;
+}
 
-export function WageScheduler({ staff }: { staff: Staff[] }) {
+function createInitialSchedule(): ScheduleShape {
+  return Object.fromEntries(WORK_DAYS.map((day) => [day, {} as Record<number, string[]>]));
+}
+
+function formatTime(minutes: number | null | undefined) {
+  if (minutes === null || minutes === undefined) return "--:--";
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function calcBreakHours(grossHours: number) {
+  if (grossHours > 8) return 1;
+  if (grossHours > 4) return 0.5;
+  return 0;
+}
+
+function sum(values: number[]) {
+  return values.reduce((acc, value) => acc + (Number(value) || 0), 0);
+}
+
+function buildWeeklyStaffSummary(staffList: Staff[], schedule: ScheduleShape, timeUnit: number, activeSlots: number[]) {
+  const hourRatio = timeUnit / 60;
+  return staffList.map((member) => {
+    const weeklyNet = sum(
+      WORK_DAYS.map((day) => {
+        const slots = activeSlots.filter((slot) => schedule?.[day]?.[slot]?.includes(member.id));
+        const grossHours = slots.length * hourRatio;
+        return Math.max(0, grossHours - calcBreakHours(grossHours));
+      }),
+    );
+
+    const workPayWeekly = Math.round(
+      sum(
+        WORK_DAYS.map((day) => {
+          const slots = activeSlots.filter((slot) => schedule?.[day]?.[slot]?.includes(member.id));
+          return slots.length * (member.baseWage + member.bonusWage) * hourRatio;
+        }),
+      ),
+    );
+
+    const holidayAllowanceAmount = Math.round((weeklyNet >= 15 ? (weeklyNet / 40) * 8 : 0) * member.baseWage);
+
+    return {
+      staffId: member.id,
+      staffName: member.name,
+      weeklyNet,
+      workPayWeekly,
+      monthlyTotalPay: (workPayWeekly + holidayAllowanceAmount) * 4 + member.incentive,
+    };
+  });
+}
+
+export function WageScheduler({
+  staff,
+  financeItems,
+  canEdit,
+}: {
+  staff: Staff[];
+  financeItems: FinanceItem[];
+  canEdit: boolean;
+}) {
+  const [tab, setTab] = useState<SchedulerTab>("schedule");
+  const [timeUnit, setTimeUnit] = useState<20 | 30 | 60>(20);
+  const [showEarlyHours, setShowEarlyHours] = useState(false);
+  const [businessHours, setBusinessHours] = useState({ start: 10, end: 22 });
   const [schedule, setSchedule] = useState<ScheduleShape>(createInitialSchedule);
-  const [selectedStaffId, setSelectedStaffId] = useState<string>(staff[0]?.id ?? "");
-  const [timeUnit] = useState(20);
+  const [selectedStaffId, setSelectedStaffId] = useState(staff[0]?.id ?? "");
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [patterns, setPatterns] = useState(DEFAULT_PATTERNS);
+  const [selectedPatternId, setSelectedPatternId] = useState(DEFAULT_PATTERNS[0].id);
+  const [newPatternName, setNewPatternName] = useState("");
   const [hourlySalesProjection, setHourlySalesProjection] = useState<Record<number, number>>({
-    10: 100000,
-    11: 300000,
-    12: 350000,
-    13: 250000,
-    18: 500000,
-    19: 550000,
-    20: 450000,
+    ...DEFAULT_PATTERNS[0].data,
   });
+  const [targetYear, setTargetYear] = useState(2026);
+  const [targetMonth, setTargetMonth] = useState(3);
+  const [monthlySnapshots, setMonthlySnapshots] = useState<Record<string, Snapshot>>({});
+  const [manualEdits, setManualEdits] = useState<Record<string, MonthlyLog | "DELETE">>({});
+  const row11AmRef = useRef<HTMLTableRowElement | null>(null);
 
+  const activeSlots = useMemo(
+    () => Array.from({ length: (24 * 60) / timeUnit }, (_, index) => index * timeUnit),
+    [timeUnit],
+  );
+  const visibleSlots = useMemo(
+    () => activeSlots.filter((slot) => (showEarlyHours ? true : slot < 60 || slot >= 540)),
+    [activeSlots, showEarlyHours],
+  );
+  const weeklySummary = useMemo(
+    () => buildWeeklyStaffSummary(staff, schedule, timeUnit, activeSlots),
+    [staff, schedule, timeUnit, activeSlots],
+  );
+  const totalRevenue = useMemo(
+    () => sum(financeItems.filter((item) => item.type === "REVENUE").map((item) => item.amount)),
+    [financeItems],
+  );
+  const totalExpense = useMemo(
+    () => sum(financeItems.filter((item) => item.type === "EXPENSE").map((item) => item.amount)),
+    [financeItems],
+  );
   const assignedSlotCount = useMemo(
-    () =>
-      Object.values(schedule).reduce(
-        (sum, slots) => sum + Object.values(slots).filter((ids) => ids.length > 0).length,
-        0,
-      ),
+    () => Object.values(schedule).reduce((acc, slots) => acc + Object.values(slots).filter((ids) => ids.length > 0).length, 0),
     [schedule],
   );
 
   useEffect(() => {
-    if (!selectedStaffId && staff[0]?.id) {
-      setSelectedStaffId(staff[0].id);
-    }
+    if (!selectedStaffId && staff[0]?.id) setSelectedStaffId(staff[0].id);
   }, [selectedStaffId, staff]);
 
   useEffect(() => {
     async function loadSchedule() {
-      const response = await fetch("/api/schedule");
-      const result = await response.json();
-      if (result.schedule) {
-        setSchedule(result.schedule.assignments);
-        setHourlySalesProjection(result.schedule.hourlySalesProjection);
+      try {
+        const response = await fetch("/api/schedule");
+        const result = await response.json();
+        if (result.schedule) {
+          setSchedule(result.schedule.assignments ?? createInitialSchedule());
+          setTimeUnit(result.schedule.timeUnit ?? 20);
+          setHourlySalesProjection((prev) => ({ ...prev, ...(result.schedule.hourlySalesProjection ?? {}) }));
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     void loadSchedule();
   }, []);
 
-  const activeSlots = useMemo(
-    () => Array.from({ length: (24 * 60) / timeUnit }, (_, i) => i * timeUnit),
-    [timeUnit],
-  );
+  useEffect(() => {
+    if (tab === "schedule" && row11AmRef.current) {
+      row11AmRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [tab, timeUnit, showEarlyHours]);
 
-  const handleCellToggle = (day: string, time: number) => {
-    if (!selectedStaffId) return;
+  function handleCellToggle(day: string, slot: number) {
+    if (!canEdit || !selectedStaffId) return;
     setSchedule((prev) => {
-      const prevDay = prev[day] || {};
-      const ids = prevDay[time] || [];
-      const has = ids.includes(selectedStaffId);
-      const next = has ? ids.filter((id) => id !== selectedStaffId) : [...ids, selectedStaffId];
-      return { ...prev, [day]: { ...prevDay, [time]: next } };
+      const daySlots = prev[day] || {};
+      const currentIds = daySlots[slot] || [];
+      const nextIds = currentIds.includes(selectedStaffId)
+        ? currentIds.filter((id) => id !== selectedStaffId)
+        : [...currentIds, selectedStaffId];
+      return { ...prev, [day]: { ...daySlots, [slot]: nextIds } };
     });
-  };
-
-  async function saveSchedule() {
-    setSaving(true);
-    setSaveMessage("");
-    const response = await fetch("/api/schedule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        timeUnit,
-        hourlySalesProjection,
-        assignments: schedule,
-      }),
-    });
-    const result = await response.json();
-    setSaving(false);
-    setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
   }
 
-  const hourlyChartData = useMemo(() => {
-    return Array.from({ length: 24 }, (_, hour) => {
-      const sales = hourlySalesProjection[hour] || 0;
-      const slotStart = hour * 60;
-      const slotEnd = slotStart + 60;
-      const slots = activeSlots.filter((slot) => slot >= slotStart && slot < slotEnd);
-      let laborCost = 0;
-      let capacity = 0;
-      slots.forEach((slot) => {
-        DAYS.forEach((day) => {
-          const ids = schedule[day]?.[slot] || [];
-          ids.forEach((id) => {
-            const found = staff.find((member) => member.id === id);
-            if (!found) return;
-            laborCost += found.targetWage * (timeUnit / 60) / 7;
-            capacity += found.capacity * (timeUnit / 60) / 7;
+  async function saveSchedule() {
+    if (!canEdit) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const response = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule }),
+      });
+      const result = await response.json();
+      setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
+    } catch {
+      setSaveMessage("스케줄 저장 중 오류가 발생했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function generateDefaultLogsForMonth(year: number, month: number) {
+    const logs: Record<string, MonthlyLog> = {};
+    const daysInMonth = new Date(year, month, 0).getDate();
+    staff.forEach((member) => {
+      for (let date = 1; date <= daysInMonth; date += 1) {
+        const dayLabel = DAYS[new Date(year, month - 1, date).getDay()];
+        const dateKey = `${year}-${month}-${date}-${member.id}`;
+        const slots = activeSlots.filter((slot) => schedule?.[dayLabel]?.[slot]?.includes(member.id));
+        if (slots.length > 0) {
+          const startTime = Math.min(...slots);
+          const endTime = Math.max(...slots) + timeUnit;
+          logs[dateKey] = { startTime, endTime, breakHours: calcBreakHours((endTime - startTime) / 60) };
+        }
+      }
+    });
+    return logs;
+  }
+
+  const currentMonthLogs = useMemo(() => {
+    const monthKey = `${targetYear}-${targetMonth}`;
+    if (monthlySnapshots[monthKey]) return monthlySnapshots[monthKey].dailyLogs;
+    const merged = { ...generateDefaultLogsForMonth(targetYear, targetMonth) };
+    Object.entries(manualEdits).forEach(([key, value]) => {
+      const [year, month] = key.split("-").map(Number);
+      if (year === targetYear && month === targetMonth) {
+        if (value === "DELETE") delete merged[key];
+        else merged[key] = value;
+      }
+    });
+    return merged;
+  }, [manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, activeSlots, timeUnit]);
+
+  const monthlyStats = useMemo(() => {
+    const monthKey = `${targetYear}-${targetMonth}`;
+    const sourceStaff = monthlySnapshots[monthKey]?.staffSnapshot ?? staff;
+    let totalLabor = 0;
+    const staffStats = sourceStaff.map((member) => {
+      let monthlyGross = 0;
+      let totalPay = member.incentive;
+      let workedDays = 0;
+      Object.entries(currentMonthLogs).forEach(([key, log]) => {
+        if (key.endsWith(`-${member.id}`)) {
+          const gross = (log.endTime - log.startTime) / 60;
+          const net = Math.max(0, gross - log.breakHours);
+          monthlyGross += gross;
+          totalPay += net * member.targetWage;
+          workedDays += 1;
+        }
+      });
+      totalLabor += totalPay;
+      return { ...member, monthlyGross, totalPay, workedDays };
+    });
+    return { totalLabor, staffStats, isSaved: Boolean(monthlySnapshots[monthKey]) };
+  }, [currentMonthLogs, monthlySnapshots, staff, targetMonth, targetYear]);
+
+  const monthlyProfit = totalRevenue - totalExpense - monthlyStats.totalLabor;
+  const laborRatio = totalRevenue > 0 ? (monthlyStats.totalLabor / totalRevenue) * 100 : 0;
+
+  const hourlyChartData = useMemo(
+    () =>
+      Array.from({ length: 24 }, (_, hour) => {
+        const sales = hourlySalesProjection[hour] || 0;
+        const slotsInHour = activeSlots.filter((slot) => slot >= hour * 60 && slot < (hour + 1) * 60);
+        let laborCost = 0;
+        let capacity = 0;
+        slotsInHour.forEach((slot) => {
+          WORK_DAYS.forEach((day) => {
+            (schedule[day]?.[slot] || []).forEach((staffId) => {
+              const member = staff.find((item) => item.id === staffId);
+              if (!member) return;
+              laborCost += member.targetWage * (timeUnit / 60) / 7;
+              capacity += member.capacity * (timeUnit / 60) / 7;
+            });
           });
         });
-      });
-      return { hour, sales, laborCost, capacity };
-    });
-  }, [activeSlots, hourlySalesProjection, schedule, staff, timeUnit]);
+        return { hour, sales, laborCost, capacity };
+      }),
+    [activeSlots, hourlySalesProjection, schedule, staff, timeUnit],
+  );
+
+  function loadPattern(patternId: string) {
+    const pattern = patterns.find((item) => item.id === patternId);
+    if (!pattern) return;
+    setSelectedPatternId(patternId);
+    setHourlySalesProjection({ ...pattern.data });
+  }
+
+  function saveCurrentAsPattern() {
+    if (!newPatternName.trim()) return alert("패턴 이름을 입력해주세요.");
+    const next = { id: `custom-${Date.now()}`, name: newPatternName.trim(), data: { ...hourlySalesProjection } };
+    setPatterns((prev) => [...prev, next]);
+    setSelectedPatternId(next.id);
+    setNewPatternName("");
+  }
+
+  function saveMonthlySnapshot() {
+    const monthKey = `${targetYear}-${targetMonth}`;
+    setMonthlySnapshots((prev) => ({
+      ...prev,
+      [monthKey]: {
+        isSaved: true,
+        staffSnapshot: JSON.parse(JSON.stringify(staff)) as Staff[],
+        dailyLogs: JSON.parse(JSON.stringify(currentMonthLogs)) as Record<string, MonthlyLog>,
+      },
+    }));
+  }
 
   return (
-    <div style={{ minHeight: "100vh", padding: 24, background: "#020617", color: "#e2e8f0" }} onMouseUp={() => setDragging(false)}>
-      <div style={{ maxWidth: 1280, margin: "0 auto", display: "grid", gap: 24 }}>
-        <header style={headerStyle}>
-          <div>
-            <div style={{ color: "#6ee7b7", marginBottom: 8 }}>저장 가능한 스케줄 워크스페이스</div>
-            <h1 style={{ margin: 0, fontSize: 32 }}>스케줄 작성과 시간대별 효율 분석</h1>
-            <p style={{ color: "#cbd5e1", maxWidth: 760 }}>
-              등록한 직원이 그대로 나타나며, 배정한 근무표와 시간대별 예상 매출을 함께 저장할 수 있습니다.
-            </p>
-          </div>
-          <div style={{ display: "grid", gap: 10, justifyItems: "end" }}>
-            <button onClick={saveSchedule} disabled={saving || loading} style={saveButtonStyle}>
-              <Save size={16} />
-              {saving ? "저장 중..." : "스케줄 저장"}
-            </button>
-            <div style={{ color: saveMessage ? "#6ee7b7" : "#94a3b8", fontSize: 14 }}>
-              {loading ? "저장된 스케줄을 불러오는 중..." : saveMessage || "변경 내용은 저장 버튼을 눌러야 반영됩니다."}
-            </div>
-          </div>
-        </header>
-
-        <section style={cardGridStyle}>
-          <InfoCard icon={<Users size={18} />} title="실제 직원 연동" body="직원 관리에서 등록한 사람이 그대로 스케줄 선택 목록에 나타납니다." />
-          <InfoCard icon={<Activity size={18} />} title="저장형 스케줄" body="작성한 배정표는 API를 통해 매장 단위로 저장됩니다." />
-          <InfoCard icon={<TrendingUp size={18} />} title="효율 분석" body="시간대별 매출, 인건비, 처리용량을 비교해 근무표를 조정할 수 있습니다." />
-        </section>
-
-        <section style={summaryGridStyle}>
-          <SummaryCard label="등록 직원 수" value={`${staff.length}명`} />
-          <SummaryCard label="배정 슬롯 수" value={`${assignedSlotCount}칸`} />
-          <SummaryCard label="분석 입력 시간대" value={`${Object.keys(hourlySalesProjection).length}개`} />
-        </section>
-
-        <section style={gridSectionStyle}>
-          <aside style={sidePanelStyle}>
-            <div style={{ marginBottom: 12, fontWeight: 700 }}>직원 선택</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {staff.length === 0 ? <div style={{ color: "#94a3b8" }}>먼저 직원을 등록해주세요.</div> : null}
-              {staff.map((member) => (
-                <button
-                  key={member.id}
-                  onClick={() => setSelectedStaffId(member.id)}
-                  style={{
-                    borderRadius: 999,
-                    padding: "10px 14px",
-                    border: member.id === selectedStaffId ? "1px solid #34d399" : "1px solid #334155",
-                    background: member.id === selectedStaffId ? "#111827" : "#020617",
-                    color: "#e2e8f0",
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
-                >
-                  {member.name}
-                </button>
-              ))}
-            </div>
-          </aside>
-
-          <div style={tablePanelStyle}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>시간</th>
-                  {DAYS.map((day) => (
-                    <th key={day} style={thStyle}>
-                      {day}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {activeSlots.filter((slot) => slot >= 9 * 60 && slot <= 22 * 60).map((slot) => (
-                  <tr key={slot}>
-                    <td style={timeCellStyle}>{formatTime(slot)}</td>
-                    {DAYS.map((day) => {
-                      const assignedIds = schedule[day]?.[slot] || [];
-                      return (
-                        <td
-                          key={`${day}-${slot}`}
-                          onMouseDown={() => {
-                            setDragging(true);
-                            handleCellToggle(day, slot);
-                          }}
-                          onMouseEnter={() => {
-                            if (dragging) handleCellToggle(day, slot);
-                          }}
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #1e293b",
-                            cursor: selectedStaffId ? "pointer" : "not-allowed",
-                            background: assignedIds.includes(selectedStaffId) ? "rgba(52,211,153,0.12)" : "transparent",
-                          }}
-                        >
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {assignedIds.map((id) => {
-                              const member = staff.find((item) => item.id === id);
-                              if (!member) return null;
-                              return (
-                                <span key={id} style={{ padding: "2px 8px", borderRadius: 999, background: member.color, color: "white", fontSize: 10 }}>
-                                  {member.name}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section style={chartPanelStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+    <div className="min-h-screen bg-slate-950 px-4 py-4 text-slate-50 md:px-6" onMouseUp={() => setDragging(false)}>
+      <div className="mx-auto flex max-w-7xl flex-col gap-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 style={{ marginTop: 0 }}>시간대별 효율 분석</h2>
-              <p style={{ color: "#94a3b8" }}>
-                저장된 근무표를 기준으로 시간대별 인건비와 처리용량을 계산합니다.
+              <div className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-400">Scheduler Workspace</div>
+              <h1 className="mt-2 text-2xl font-bold">스케줄, 분석, 월별 근무일지를 한 화면에서 관리</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                20분, 30분, 1시간 단위 전환과 시간대별 효율 분석, 월 급여 마감 흐름을 다시 붙였습니다.
               </p>
             </div>
-            <div style={{ display: "flex", gap: 12, color: "#cbd5e1", fontSize: 12 }}>
-              <Legend color="rgba(59,130,246,0.6)" label="매출" />
-              <Legend color="rgba(239,68,68,0.6)" label="인건비" />
-              <Legend color="#34d399" label="처리용량" line />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={saveSchedule}
+                disabled={!canEdit || saving || loading}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+              >
+                <Save className="h-4 w-4" />
+                {saving ? "저장 중..." : "스케줄 저장"}
+              </button>
+              <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-400">
+                {loading ? "불러오는 중..." : saveMessage || "변경 후 저장을 눌러 현재 매장 스케줄에 반영하세요."}
+              </div>
             </div>
           </div>
-          <div style={{ height: 260, display: "flex", alignItems: "end", gap: 6, marginTop: 18 }}>
-            {hourlyChartData.map((item) => {
-              const maxVal = 600000;
-              const salesHeight = Math.min((item.sales / maxVal) * 100, 100);
-              const laborHeight = Math.min((item.laborCost / maxVal) * 100, 100);
-              const capacityHeight = Math.min((item.capacity / maxVal) * 100, 100);
-              const overload = item.sales > item.capacity && item.capacity > 0;
-              return (
-                <div key={item.hour} style={{ flex: 1, minWidth: 24, position: "relative", height: "100%" }}>
-                  <div style={{ position: "absolute", left: 0, right: 0, bottom: `${capacityHeight}%`, borderTop: "1px dashed #34d399" }} />
-                  <div style={{ display: "flex", alignItems: "end", height: "100%", gap: 2 }}>
-                    <div style={{ width: "50%", height: `${salesHeight}%`, background: "rgba(59,130,246,0.6)", borderRadius: "6px 6px 0 0" }} />
-                    <div style={{ width: "50%", height: `${laborHeight}%`, background: overload ? "rgba(239,68,68,0.9)" : "rgba(239,68,68,0.55)", borderRadius: "6px 6px 0 0" }} />
-                  </div>
-                  <div style={{ marginTop: 8, textAlign: "center", color: "#64748b", fontSize: 11 }}>{item.hour}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(72px, 1fr))", gap: 8 }}>
-            {Array.from({ length: 24 }, (_, hour) => (
-              <label key={hour} style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>{hour}시</span>
-                <input
-                  type="number"
-                  value={hourlySalesProjection[hour] || 0}
-                  onChange={(event) =>
-                    setHourlySalesProjection((prev) => ({
-                      ...prev,
-                      [hour]: Number(event.target.value),
-                    }))
-                  }
-                  style={salesInputStyle}
-                />
-              </label>
-            ))}
-          </div>
-          <div style={{ marginTop: 16, display: "flex", gap: 12, color: "#94a3b8", fontSize: 12 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <TrendingUp size={14} color="#34d399" />
-              수익이 높은 시간대를 빠르게 확인
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <TrendingDown size={14} color="#fb923c" />
-              저효율 시간대 인력 배치 조정
-            </span>
-          </div>
         </section>
+
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="등록 직원 수" value={`${staff.length}명`} helper="직원 관리와 연동" />
+          <MetricCard label="배정 슬롯" value={`${assignedSlotCount}칸`} helper={`${timeUnit}분 단위 기준`} />
+          <MetricCard label="월 예상 손익" value={`${monthlyProfit.toLocaleString()}원`} helper={`인건비율 ${laborRatio.toFixed(1)}%`} />
+          <MetricCard label="권한" value={canEdit ? "편집 가능" : "읽기 전용"} helper={canEdit ? "직접 수정 가능" : "조회 중심"} />
+        </section>
+
+        <div className="flex flex-wrap gap-2 overflow-x-auto pb-1">
+          {[
+            { id: "schedule", label: `스케줄 (${timeUnit}분)`, icon: Clock },
+            { id: "analysis", label: "효율 분석", icon: PieChart },
+            { id: "summary", label: "월별 근무일지", icon: Calendar },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id as SchedulerTab)}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium ${
+                  tab === item.id ? "border-emerald-500 bg-emerald-600 text-white" : "border-slate-700 bg-slate-900 text-slate-300"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === "schedule" ? (
+          <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+            <aside className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Clock className="h-4 w-4 text-emerald-400" />시간 단위</div>
+                <div className="flex gap-2">
+                  {[20, 30, 60].map((unit) => (
+                    <button
+                      key={unit}
+                      type="button"
+                      onClick={() => setTimeUnit(unit as 20 | 30 | 60)}
+                      className={`rounded-lg px-3 py-1.5 text-sm ${timeUnit === unit ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300"}`}
+                    >
+                      {unit}분
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-3 flex items-center justify-between text-sm font-semibold">
+                  <span>표시 범위</span>
+                  <button type="button" onClick={() => setShowEarlyHours((prev) => !prev)} className="inline-flex items-center gap-1 text-xs text-slate-400">
+                    {showEarlyHours ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    {showEarlyHours ? "새벽 접기" : "새벽 펼치기"}
+                  </button>
+                </div>
+                <p className="text-xs leading-5 text-slate-400">기본값은 오전 9시 이후만 보여주며 필요하면 새벽 시간대까지 확장할 수 있습니다.</p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-emerald-400" />직원 선택</div>
+                <div className="grid gap-2">
+                  {staff.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      onClick={() => setSelectedStaffId(member.id)}
+                      className={`flex items-center gap-2 rounded-full border px-3 py-2 text-left text-sm ${
+                        selectedStaffId === member.id ? "border-emerald-500 bg-slate-800 text-white" : "border-slate-700 bg-slate-900 text-slate-300"
+                      }`}
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.color }} />
+                      {member.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="mb-3 text-sm font-semibold">주간 요약</div>
+                <div className="grid gap-2">
+                  {weeklySummary.map((item) => (
+                    <div key={item.staffId} className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
+                      <div className="flex items-center justify-between text-sm font-medium">
+                        <span>{item.staffName}</span>
+                        <span className="text-emerald-400">{item.weeklyNet.toFixed(1)}h</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">주급 {item.workPayWeekly.toLocaleString()}원 · 월 예상 {item.monthlyTotalPay.toLocaleString()}원</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </aside>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">주간 배정표</div>
+                  <div className="text-xs text-slate-400">원본처럼 20분, 30분, 1시간 단위로 바꾸면 표도 바로 다시 계산됩니다.</div>
+                </div>
+                {!canEdit ? <div className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-400">직원 계정은 읽기 전용입니다.</div> : null}
+              </div>
+
+              <div className="h-[700px] overflow-auto rounded-xl border border-slate-800">
+                <table className="min-w-full border-collapse text-[11px]">
+                  <thead className="sticky top-0 z-20 bg-slate-900 text-slate-300">
+                    <tr>
+                      <th className="w-24 border-b border-r border-slate-700 px-3 py-2 text-left">시간</th>
+                      {WORK_DAYS.map((day) => <th key={day} className="min-w-[108px] border-b border-r border-slate-700 px-3 py-2 text-center">{day}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-slate-950/50">
+                    {!showEarlyHours ? <tr><td colSpan={8} className="cursor-pointer border-b border-slate-800 bg-slate-900/70 py-2 text-center text-[10px] text-slate-500" onClick={() => setShowEarlyHours(true)}>새벽 시간 숨김 (눌러서 펼치기)</td></tr> : null}
+                    {visibleSlots.map((slot) => {
+                      const isHourStart = slot % 60 === 0;
+                      const borderClass = isHourStart ? "border-t-2 border-slate-600" : "border-t border-slate-800/60";
+                      return (
+                        <tr key={slot} ref={slot === 660 ? row11AmRef : null}>
+                          <td className={`border-r border-slate-700 bg-slate-900/60 px-3 py-1 font-mono ${isHourStart ? "font-bold text-slate-200" : "text-[10px] text-slate-500"} ${borderClass}`}>{formatTime(slot)}</td>
+                          {WORK_DAYS.map((day) => {
+                            const assignedIds = schedule[day]?.[slot] || [];
+                            return (
+                              <td
+                                key={`${day}-${slot}`}
+                                onMouseDown={() => {
+                                  if (!canEdit) return;
+                                  setDragging(true);
+                                  handleCellToggle(day, slot);
+                                }}
+                                onMouseEnter={() => {
+                                  if (dragging) handleCellToggle(day, slot);
+                                }}
+                                className={`h-9 border-r border-slate-800 px-2 py-1 hover:bg-slate-800/60 ${canEdit ? "cursor-pointer" : "cursor-default"} ${borderClass}`}
+                              >
+                                <div className="flex min-h-[24px] flex-wrap items-center gap-1">
+                                  {assignedIds.map((staffId) => {
+                                    const member = staff.find((item) => item.id === staffId);
+                                    if (!member) return null;
+                                    return <span key={staffId} className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: member.color }}>{member.name}</span>;
+                                  })}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {tab === "analysis" ? (
+          <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <section className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-emerald-400" />매출 패턴 불러오기</div>
+                <div className="space-y-3">
+                  <select value={selectedPatternId} onChange={(event) => loadPattern(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+                    {patterns.map((pattern) => <option key={pattern.id} value={pattern.id}>{pattern.name}</option>)}
+                  </select>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="mb-2 text-xs text-slate-400">현재 패턴 저장</div>
+                    <div className="flex gap-2">
+                      <input value={newPatternName} onChange={(event) => setNewPatternName(event.target.value)} placeholder="예: 금요일 피크" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm" />
+                      <button type="button" onClick={saveCurrentAsPattern} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">저장</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><Store className="h-4 w-4 text-emerald-400" />월 손익 개요</div>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-400">총 매출</span><span className="font-semibold text-emerald-400">{totalRevenue.toLocaleString()}원</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">총 지출</span><span className="font-semibold text-red-400">-{totalExpense.toLocaleString()}원</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">예상 인건비</span><span className="font-semibold text-orange-400">-{monthlyStats.totalLabor.toLocaleString()}원</span></div>
+                  <div className="border-t border-slate-800 pt-3"><div className="flex justify-between"><span className="font-semibold">예상 순이익</span><span className={monthlyProfit >= 0 ? "font-bold text-emerald-400" : "font-bold text-red-500"}>{monthlyProfit.toLocaleString()}원</span></div></div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-lg font-semibold"><Activity className="h-5 w-5 text-emerald-400" />시간대별 효율성 분석</div>
+                  <p className="mt-1 text-sm text-slate-400">매출, 인건비, 처리 용량을 같은 축으로 비교합니다.</p>
+                </div>
+                <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs">
+                  <span className="text-slate-400">영업시간</span>
+                  <input type="number" min="0" max="23" value={businessHours.start} onChange={(event) => setBusinessHours((prev) => ({ ...prev, start: Number(event.target.value) }))} className="w-10 rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-center" />
+                  <span className="text-slate-500">시 ~</span>
+                  <input type="number" min="0" max="23" value={businessHours.end} onChange={(event) => setBusinessHours((prev) => ({ ...prev, end: Number(event.target.value) }))} className="w-10 rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-center" />
+                  <span className="text-slate-500">시</span>
+                </div>
+              </div>
+
+              <div className="mb-4 flex flex-wrap gap-4 text-xs text-slate-400">
+                <Legend color="bg-blue-500/60" label="매출" />
+                <Legend color="bg-red-500/60" label="인건비" />
+                <Legend color="bg-emerald-500" label="처리 용량" line />
+              </div>
+
+              <div className="flex h-72 items-end gap-1 overflow-x-auto border-b border-slate-800 pb-6">
+                {hourlyChartData.map((item) => {
+                  const maxValue = 600000;
+                  const salesHeight = Math.min((item.sales / maxValue) * 100, 100);
+                  const laborHeight = Math.min((item.laborCost / maxValue) * 100, 100);
+                  const capacityHeight = Math.min((item.capacity / maxValue) * 100, 100);
+                  const overload = item.sales > item.capacity && item.capacity > 0;
+                  const idle = item.sales < item.capacity * 0.3 && item.laborCost > 0;
+                  const inBusiness = item.hour >= businessHours.start && item.hour <= businessHours.end;
+                  return (
+                    <div key={item.hour} className={`group relative flex h-full min-w-[34px] flex-1 flex-col justify-end ${!inBusiness ? "opacity-35" : ""}`}>
+                      <div className="mb-1 flex h-4 items-center justify-center">
+                        {inBusiness && overload ? <AlertTriangle className="h-3 w-3 text-red-500" /> : null}
+                        {inBusiness && !overload && idle ? <TrendingDown className="h-3 w-3 text-orange-400" /> : null}
+                      </div>
+                      <div className="relative flex h-full items-end gap-[2px]">
+                        <div className="absolute left-0 right-0 border-t border-dashed border-emerald-500" style={{ bottom: `${capacityHeight}%` }} />
+                        <div className="w-1/2 rounded-t-sm bg-blue-500/60" style={{ height: `${salesHeight}%` }} />
+                        <div className="w-1/2 rounded-t-sm bg-red-500/60" style={{ height: `${laborHeight}%` }} />
+                      </div>
+                      <div className="mt-2 text-center text-[10px] text-slate-500">{item.hour}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 grid grid-cols-6 gap-2 md:grid-cols-12">
+                {Array.from({ length: 24 }, (_, hour) => (
+                  <label key={hour} className="flex flex-col gap-1">
+                    <span className="text-center text-[10px] text-slate-500">{hour}시</span>
+                    <input type="number" value={hourlySalesProjection[hour] || 0} onChange={(event) => setHourlySalesProjection((prev) => ({ ...prev, [hour]: Number(event.target.value) }))} className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-center text-[11px]" />
+                  </label>
+                ))}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {tab === "summary" ? (
+          <div className="space-y-5">
+            <section className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                  <Calendar className="h-4 w-4 text-emerald-400" />
+                  <select value={targetYear} onChange={(event) => setTargetYear(Number(event.target.value))} className="bg-transparent text-sm outline-none">
+                    {[2025, 2026, 2027].map((year) => <option key={year} value={year}>{year}년</option>)}
+                  </select>
+                  <select value={targetMonth} onChange={(event) => setTargetMonth(Number(event.target.value))} className="bg-transparent text-sm outline-none">
+                    {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month}월</option>)}
+                  </select>
+                </div>
+                {monthlyStats.isSaved ? <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-800 bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-400"><Lock className="h-3 w-3" />확정 저장됨</div> : null}
+              </div>
+              {canEdit && !monthlyStats.isSaved ? <button type="button" onClick={saveMonthlySnapshot} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">이번 달 근무 확정</button> : null}
+            </section>
+
+            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-950 text-slate-400">
+                  <tr><th className="px-4 py-3">직원</th><th className="px-4 py-3 text-right">근무일수</th><th className="px-4 py-3 text-right">총 근무</th><th className="px-4 py-3 text-right">총 급여</th></tr>
+                </thead>
+                <tbody>
+                  {monthlyStats.staffStats.map((member) => (
+                    <tr key={member.id} onClick={() => setSelectedStaffId(member.id)} className={`cursor-pointer border-t border-slate-800 ${selectedStaffId === member.id ? "bg-slate-800" : "hover:bg-slate-800/50"}`}>
+                      <td className="px-4 py-3 font-semibold"><div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.color }} />{member.name}</div></td>
+                      <td className="px-4 py-3 text-right text-slate-400">{member.workedDays}일</td>
+                      <td className="px-4 py-3 text-right text-slate-300">{member.monthlyGross.toFixed(1)}h</td>
+                      <td className="px-4 py-3 text-right font-semibold text-orange-400">{member.totalPay.toLocaleString()}원</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
+                <Calendar className="h-4 w-4 text-emerald-400" />
+                월별 상세 근무 일지
+              </div>
+              <div className="grid grid-cols-7 gap-2">
+                {DAYS.map((day) => (
+                  <div key={day} className="py-1 text-center text-xs text-slate-500">
+                    {day}
+                  </div>
+                ))}
+                {(() => {
+                  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+                  const firstDay = new Date(targetYear, targetMonth - 1, 1).getDay();
+                  const selectedMember = monthlyStats.staffStats.find((member) => member.id === selectedStaffId) ?? monthlyStats.staffStats[0];
+                  const cells: ReactNode[] = [];
+
+                  for (let index = 0; index < firstDay; index += 1) {
+                    cells.push(<div key={`empty-${index}`} className="h-24 rounded-lg border border-transparent" />);
+                  }
+
+                  for (let date = 1; date <= daysInMonth; date += 1) {
+                    const dateKey = `${targetYear}-${targetMonth}-${date}-${selectedMember?.id}`;
+                    const log = currentMonthLogs[dateKey];
+                    cells.push(
+                      <div key={date} className={`flex h-24 flex-col justify-between rounded-lg border p-2 ${log ? "border-slate-700 bg-slate-800" : "border-slate-800 bg-slate-950/40"}`}>
+                        <div className="text-[10px] text-slate-500">{date}</div>
+                        {log ? (
+                          <>
+                            <div className="text-[11px] font-semibold text-slate-200">
+                              {formatTime(log.startTime)} ~ {formatTime(log.endTime)}
+                            </div>
+                            <div className="text-right text-[10px] text-orange-400">
+                              {Math.round((((log.endTime - log.startTime) / 60) - log.breakHours) * (selectedMember?.targetWage || 0)).toLocaleString()}원
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center text-[11px] text-slate-600">휴무</div>
+                        )}
+                      </div>,
+                    );
+                  }
+
+                  return cells;
+                })()}
+              </div>
+            </section>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function InfoCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+function MetricCard({ label, value, helper }: { label: string; value: string; helper: string }) {
   return (
-    <div style={infoCardStyle}>
-      <div style={{ color: "#34d399", marginBottom: 10 }}>{icon}</div>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>{title}</div>
-      <div style={{ color: "#94a3b8", lineHeight: 1.5 }}>{body}</div>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={summaryCardStyle}>
-      <div style={{ color: "#94a3b8", marginBottom: 8 }}>{label}</div>
-      <div style={{ fontWeight: 700, fontSize: 24 }}>{value}</div>
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+      <div className="text-xs font-medium text-slate-500">{label}</div>
+      <div className="mt-2 text-2xl font-bold">{value}</div>
+      <div className="mt-1 text-xs text-slate-400">{helper}</div>
     </div>
   );
 }
 
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
-  return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ width: 12, height: line ? 2 : 12, background: color }} />
-      {label}
-    </span>
-  );
+  return <span className="inline-flex items-center gap-2"><span className={`${color} ${line ? "h-[2px] w-4" : "h-3 w-3"} inline-block rounded-sm`} />{label}</span>;
 }
-
-const headerStyle: React.CSSProperties = {
-  padding: 20,
-  borderRadius: 20,
-  border: "1px solid #1e293b",
-  background: "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(8,47,73,0.9))",
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
-  flexWrap: "wrap",
-};
-const saveButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
-  background: "#10b981",
-  color: "#052e16",
-  border: "none",
-  borderRadius: 12,
-  padding: "12px 16px",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-const cardGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 };
-const infoCardStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
-const summaryGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 };
-const summaryCardStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
-const gridSectionStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, alignItems: "start" };
-const sidePanelStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
-const tablePanelStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a", overflow: "auto" };
-const thStyle: React.CSSProperties = { padding: 8, borderBottom: "1px solid #334155" };
-const timeCellStyle: React.CSSProperties = { padding: 8, borderBottom: "1px solid #1e293b", color: "#94a3b8" };
-const chartPanelStyle: React.CSSProperties = { borderRadius: 18, padding: 18, border: "1px solid #1e293b", background: "#0f172a" };
-const salesInputStyle: React.CSSProperties = { width: "100%", background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 10, padding: "8px 6px", textAlign: "center" };

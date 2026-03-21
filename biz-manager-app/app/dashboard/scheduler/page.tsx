@@ -12,9 +12,14 @@ export default async function SchedulerPage() {
       id: item.id,
       name: item.name,
       color: item.color,
+      baseWage: item.baseWage,
       targetWage: item.targetWage,
+      holidayWage: item.holidayWage,
+      bonusWage: item.bonusWage,
       capacity: item.capacity,
+      incentive: item.incentive,
     }));
+  const financeItems = data.finance.filter((item) => item.storeId === session.storeId);
 
   return (
     <>
@@ -23,7 +28,7 @@ export default async function SchedulerPage() {
           <DashboardTabs current="/dashboard/scheduler" role={session.role} />
         </div>
       </div>
-      <WageScheduler staff={staff} />
+      <WageScheduler staff={staff} financeItems={financeItems} canEdit={session.role !== "STAFF"} />
     </>
   );
 }
