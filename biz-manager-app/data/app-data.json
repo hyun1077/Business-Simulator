@@ -3,40 +3,60 @@
     {
       "id": "404b8252-3ff2-4b28-af64-5bd56a1cb304",
       "loginId": "kevin",
-      "name": "kevin",
-      "passwordHash": "$2a$10$HGrXOqijibg.cHrPCsbbfu5nBKCbxvWy268212ujUbxgg.y6deFLm",
-      "systemRole": "STAFF"
+      "name": "케빈",
+      "passwordHash": "$2a$10$wFuBCC.BoLqlWOKT/hHWhudcWpEcVz54kwW24t3mgS9cPPnELYg4y",
+      "systemRole": "OWNER"
     }
   ],
   "stores": [
     {
       "id": "700dc31e-da1b-4b5c-a431-033865e5f344",
-      "code": "kevin",
-      "name": "123",
-      "businessType": "Restaurant",
-      "ownerUserId": null
+      "code": "kevin-main",
+      "name": "케빈키친 본점",
+      "businessType": "외식업",
+      "ownerUserId": "404b8252-3ff2-4b28-af64-5bd56a1cb304"
     }
   ],
   "memberships": [
     {
       "userId": "404b8252-3ff2-4b28-af64-5bd56a1cb304",
       "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
-      "role": "STAFF"
+      "role": "OWNER"
     }
   ],
   "staff": [
     {
       "id": "7c38f4da-ae92-4315-a33b-aeb459a6f1f4",
       "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
-      "name": "우현규",
+      "name": "매니저",
       "color": "#10b981",
-      "baseWage": 10030,
-      "targetWage": 12000,
-      "capacity": 100000,
-      "incentive": 0,
-      "holidayWage": 2006,
-      "bonusWage": 0
+      "baseWage": 12000,
+      "targetWage": 15000,
+      "holidayWage": 2400,
+      "bonusWage": 600,
+      "capacity": 200000,
+      "incentive": 100000
     }
   ],
-  "finance": []
+  "finance": [
+    {
+      "id": "f-rev-1",
+      "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
+      "type": "REVENUE",
+      "category": "홀 매출",
+      "amount": 18000000,
+      "memo": "기본 테스트 데이터",
+      "targetDate": "2026-03-01"
+    },
+    {
+      "id": "f-exp-1",
+      "storeId": "700dc31e-da1b-4b5c-a431-033865e5f344",
+      "type": "EXPENSE",
+      "category": "임대료",
+      "amount": 2000000,
+      "memo": "기본 테스트 데이터",
+      "targetDate": "2026-03-01"
+    }
+  ],
+  "schedules": []
 }

@@ -30,10 +30,10 @@ export default async function HomePage() {
         }}
       >
         <div style={{ color: "#34d399", marginBottom: 12 }}>자영업자 운영 관리 플랫폼</div>
-        <h1 style={{ marginTop: 0, fontSize: 44 }}>로그인 기반 매장 운영 시뮬레이터</h1>
+        <h1 style={{ marginTop: 0, fontSize: 44 }}>로그인 기반 매장 운영 대시보드</h1>
         <p style={{ color: "#cbd5e1", lineHeight: 1.7 }}>
-          여러 사용자가 로그인하고, 역할에 따라 접근 권한이 달라지며, 직원 관리, 매출/지출 기록,
-          스케줄 작성, 시간대별 효율 분석까지 한 번에 관리할 수 있는 웹 앱입니다.
+          여러 사용자가 로그인하고 역할에 따라 자동으로 권한이 나뉘는 매장 운영 도구입니다.
+          직원 관리, 매출·지출 기록, 스케줄 작성, 시간대별 운영 분석까지 한 곳에서 이어서 관리할 수 있습니다.
         </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 24 }}>
           <Link
@@ -44,6 +44,7 @@ export default async function HomePage() {
               background: "#10b981",
               color: "#052e16",
               fontWeight: 700,
+              textDecoration: "none",
             }}
           >
             로그인
@@ -55,6 +56,8 @@ export default async function HomePage() {
               borderRadius: 12,
               background: "#111827",
               border: "1px solid #334155",
+              color: "#e2e8f0",
+              textDecoration: "none",
             }}
           >
             회원가입

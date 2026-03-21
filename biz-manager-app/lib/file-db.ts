@@ -84,15 +84,26 @@ async function ensureDataFile() {
   }
 }
 
+function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
+  return {
+    users: Array.isArray(raw?.users) ? raw.users : [],
+    stores: Array.isArray(raw?.stores) ? raw.stores : [],
+    memberships: Array.isArray(raw?.memberships) ? raw.memberships : [],
+    staff: Array.isArray(raw?.staff) ? raw.staff : [],
+    finance: Array.isArray(raw?.finance) ? raw.finance : [],
+    schedules: Array.isArray(raw?.schedules) ? raw.schedules : [],
+  };
+}
+
 export async function readAppData() {
   await ensureDataFile();
   const content = await fs.readFile(dataFile, "utf8");
-  return JSON.parse(content) as AppData;
+  return normalizeAppData(JSON.parse(content) as Partial<AppData>);
 }
 
 export async function writeAppData(data: AppData) {
   await ensureDataFile();
-  await fs.writeFile(dataFile, JSON.stringify(data, null, 2), "utf8");
+  await fs.writeFile(dataFile, JSON.stringify(normalizeAppData(data), null, 2), "utf8");
 }
 
 export function createId() {

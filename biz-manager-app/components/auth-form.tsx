@@ -19,7 +19,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     role: "OWNER" as RegisterRole,
     storeCode: "",
     storeName: "",
-    businessType: "음식점",
+    businessType: "외식업",
   });
 
   const isRegister = mode === "register";
@@ -33,28 +33,32 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setError("");
 
     startTransition(async () => {
-      const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
-      const payload = isRegister
-        ? form
-        : {
-            loginId: form.loginId,
-            password: form.password,
-          };
+      try {
+        const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
+        const payload = isRegister
+          ? form
+          : {
+              loginId: form.loginId,
+              password: form.password,
+            };
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      const result = await response.json();
-      if (!response.ok) {
-        setError(result.message ?? "요청 처리에 실패했습니다.");
-        return;
+        const result = await response.json();
+        if (!response.ok) {
+          setError(result.message ?? "요청 처리에 실패했습니다.");
+          return;
+        }
+
+        router.push(result.nextPath ?? "/dashboard");
+        router.refresh();
+      } catch {
+        setError("서버와 통신하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.");
       }
-
-      router.push(result.nextPath ?? "/dashboard");
-      router.refresh();
     });
   }
 
@@ -72,9 +76,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
     >
       <div>
         <div style={{ color: "#34d399", fontSize: 14, marginBottom: 8 }}>
-          {isRegister ? "계정 생성과 역할 선택" : "로그인"}
+          {isRegister ? "계정 생성과 매장 연결" : "로그인"}
         </div>
         <h1 style={{ margin: 0, fontSize: 34 }}>{isRegister ? "회원가입" : "로그인"}</h1>
+        {!isRegister ? (
+          <p style={{ marginTop: 10, marginBottom: 0, color: "#94a3b8", fontSize: 14, lineHeight: 1.6 }}>
+            테스트 계정: `kevin` / `kevin1234`
+          </p>
+        ) : null}
       </div>
 
       <label style={{ display: "grid", gap: 6 }}>
@@ -178,7 +187,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </button>
 
       <div style={{ color: "#94a3b8", fontSize: 14, textAlign: "center" }}>
-        {isRegister ? "이미 계정이 있나요? " : "처음 사용하나요? "}
+        {isRegister ? "이미 계정이 있나요? " : "처음 사용하시나요? "}
         <Link href={isRegister ? "/login" : "/register"} style={{ color: "#34d399" }}>
           {isRegister ? "로그인으로 이동" : "회원가입으로 이동"}
         </Link>

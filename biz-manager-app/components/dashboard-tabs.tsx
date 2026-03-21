@@ -12,7 +12,7 @@ const tabs: Array<{
   { href: "/dashboard", label: "대시보드", minRole: "STAFF" },
   { href: "/dashboard/scheduler", label: "스케줄", minRole: "STAFF" },
   { href: "/dashboard/staff", label: "직원 관리", minRole: "MANAGER" },
-  { href: "/dashboard/finance", label: "매출·지출", minRole: "OWNER" },
+  { href: "/dashboard/finance", label: "재무 관리", minRole: "OWNER" },
 ];
 
 export function DashboardTabs({
