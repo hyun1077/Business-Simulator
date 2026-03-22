@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { readAppData, writeAppData } from "@/lib/file-db";
 
 const bodySchema = z.object({
@@ -22,7 +22,8 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
   const data = await readAppData();
   const schedule = data.schedules.find((item) => item.storeId === session.storeId);
 
@@ -32,7 +33,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
   const body = bodySchema.parse(await request.json());
   const data = await readAppData();
 

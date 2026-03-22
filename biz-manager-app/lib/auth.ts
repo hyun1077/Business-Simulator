@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 import { canAccess } from "@/lib/permissions";
 import type { SystemRole } from "@/types/domain";
 
@@ -79,6 +80,37 @@ export async function requireRole(required: SystemRole) {
   const session = await requireSession();
   if (!canAccess(required, session.role)) {
     redirect("/dashboard");
+  }
+
+  return session;
+}
+
+export async function requireApiSession() {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json(
+      { message: "로그인이 필요합니다. 다시 로그인해 주세요." },
+      { status: 401 },
+    );
+  }
+
+  return session;
+}
+
+export async function requireApiRole(required: SystemRole) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json(
+      { message: "로그인이 필요합니다. 다시 로그인해 주세요." },
+      { status: 401 },
+    );
+  }
+
+  if (!canAccess(required, session.role)) {
+    return NextResponse.json(
+      { message: "이 작업을 수행할 권한이 없습니다." },
+      { status: 403 },
+    );
   }
 
   return session;

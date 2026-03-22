@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { readApiResponse } from "@/lib/client-api";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 import type { SystemRole } from "@/types/domain";
 
@@ -195,27 +196,40 @@ export function StaffManager({
 
   async function submit() {
     setError("");
+    setNotice("");
     const nextForm = {
       ...form,
       insuranceRate: getEmployerInsuranceRate(form),
     };
     startTransition(async () => {
-      const response = await fetch("/api/staff", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextForm),
-      });
-      const result = await response.json();
+      try {
+        const response = await fetch("/api/staff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nextForm),
+        });
+        const { data, message } = await readApiResponse<{ staff?: StaffMember; message?: string }>(response);
 
-      if (!response.ok) {
-        setError(result.message ?? "직원 저장에 실패했습니다.");
-        return;
+        if (!response.ok || !data?.staff) {
+          setError(message ?? "직원 저장에 실패했습니다.");
+          return;
+        }
+
+        setStaff((prev) => [data.staff!, ...prev]);
+        setSelectedStaffId(data.staff.id);
+        setNotice("직원 정보가 저장되었습니다.");
+        setForm((prev) => ({
+          ...prev,
+          name: "",
+          monthlySalary: 0,
+          performanceBonus: 0,
+          mealAllowance: 0,
+          transportAllowance: 0,
+          otherAllowance: 0,
+        }));
+      } catch {
+        setError("직원 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
       }
-
-      setStaff((prev) => [result.staff, ...prev]);
-      setSelectedStaffId(result.staff.id);
-      setNotice("직원 정보가 저장되었습니다.");
-      setForm((prev) => ({ ...prev, name: "", monthlySalary: 0, performanceBonus: 0, mealAllowance: 0, transportAllowance: 0, otherAllowance: 0 }));
     });
   }
 
@@ -275,6 +289,16 @@ export function StaffManager({
               </div>
             </div>
             <div style={stack}>
+              <div style={subtleBox}>
+                <strong style={{ display: "block", marginBottom: 10 }}>입력 가이드</strong>
+                <div style={{ display: "grid", gap: 8, color: "#cbd5e1", lineHeight: 1.6, fontSize: 13 }}>
+                  <div>기본시급: 법정 최저시급 또는 실제 계약 기본시급을 넣습니다.</div>
+                  <div>최종시급: 주휴수당, 상여, 각종 수당을 반영했을 때 맞추고 싶은 최종 시급입니다.</div>
+                  <div>시간당 기대매출: 이 직원이 한 시간 근무할 때 기대하는 매출 기여값입니다.</div>
+                  <div>월급 총액과 예상 월 근로시간을 입력하면 월급제를 시급으로 환산해 보여줍니다.</div>
+                  <div>프리랜서면 보통 3.3% 원천징수율을, 4대보험이면 근로자 부담과 회사 부담 비율을 각각 입력합니다.</div>
+                </div>
+              </div>
               <div style={formGrid}>
                 {renderBasicFields(form, setForm)}
               </div>

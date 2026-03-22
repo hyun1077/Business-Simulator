@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { createId, readAppData, writeAppData } from "@/lib/file-db";
 
 const bodySchema = z.object({
@@ -31,7 +31,8 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
   const data = await readAppData();
   const staff = data.staff.filter((item) => item.storeId === session.storeId).reverse();
 
@@ -39,7 +40,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
   const body = bodySchema.parse(await request.json());
   const data = await readAppData();
   const holidayWage = Math.round(body.baseWage * 0.2);

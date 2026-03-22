@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, AlertTriangle, Calendar, Check, ChevronDown, ChevronUp, Clock, FolderOpen, Lock, PieChart, RotateCcw, Save, Store, TrendingDown } from "lucide-react";
+import { readApiResponse } from "@/lib/client-api";
 import styles from "./wage-scheduler.module.css";
 
 const CALENDAR_DAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -123,24 +124,34 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     async function loadSchedule() {
       try {
         const response = await fetch("/api/schedule");
-        const result = await response.json();
-        if (result.schedule) {
-          setSchedule(mergeSchedule(result.schedule.assignments));
-          setTimeUnit(result.schedule.timeUnit ?? 20);
+        const { data, message } = await readApiResponse<{ schedule?: {
+          assignments: ScheduleShape;
+          timeUnit: number;
+          seasonProfiles?: SeasonProfile[];
+          activeSeasonProfileId?: string | null;
+          hourlySalesProjection?: Record<number, number>;
+        }; message?: string }>(response);
+        if (data?.schedule) {
+          setSchedule(mergeSchedule(data.schedule.assignments));
+          const nextTimeUnit = data.schedule.timeUnit === 30 || data.schedule.timeUnit === 60 ? data.schedule.timeUnit : 20;
+          setTimeUnit(nextTimeUnit);
           const loadedSeasonProfiles =
-            Array.isArray(result.schedule.seasonProfiles) && result.schedule.seasonProfiles.length > 0
-              ? result.schedule.seasonProfiles
+            Array.isArray(data.schedule.seasonProfiles) && data.schedule.seasonProfiles.length > 0
+              ? data.schedule.seasonProfiles
               : DEFAULT_SEASON_PROFILES;
           const loadedSeasonId =
-            result.schedule.activeSeasonProfileId ??
+            data.schedule.activeSeasonProfileId ??
             loadedSeasonProfiles[0]?.id ??
             DEFAULT_SEASON_PROFILES[0].id;
           setSeasonProfiles(loadedSeasonProfiles);
           setActiveSeasonProfileId(loadedSeasonId);
           const activeProfile = loadedSeasonProfiles.find((profile: SeasonProfile) => profile.id === loadedSeasonId) ?? loadedSeasonProfiles[0];
-          setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(result.schedule.hourlySalesProjection ?? {}) });
+          setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(data.schedule.hourlySalesProjection ?? {}) });
         } else {
           setSchedule(createInitialSchedule());
+          if (message) {
+            setSaveMessage(message);
+          }
         }
       } catch {
         setSaveMessage("스케줄을 불러오지 못했습니다. 현재 화면 기준으로 새로 작성할 수 있습니다.");
@@ -171,8 +182,8 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     setSaveMessage("");
     try {
       const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule, seasonProfiles, activeSeasonProfileId }) });
-      const result = await response.json();
-      setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : result.message ?? "스케줄 저장에 실패했습니다.");
+      const { message } = await readApiResponse<{ message?: string }>(response);
+      setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : message ?? "스케줄 저장에 실패했습니다.");
     } catch {
       setSaveMessage("스케줄 저장 중 오류가 발생했습니다.");
     } finally {

@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { BarChart3, Calendar, DollarSign, Receipt, Save, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { DashboardTabs } from "@/components/dashboard-tabs";
+import { readApiResponse } from "@/lib/client-api";
 import type { SystemRole } from "@/types/domain";
 
 type FinanceItem = {
@@ -260,77 +261,89 @@ export function FinanceManager({
   async function submitQuickEntry() {
     setError("");
     startTransition(async () => {
-      const payload = {
-        type: form.type,
-        category: form.category.trim(),
-        amount: form.type === "EXPENSE" && form.inputMode === "RATIO" ? 0 : Number(form.amount),
-        inputMode: form.type === "EXPENSE" ? form.inputMode : "AMOUNT",
-        ratioPercent: form.type === "EXPENSE" && form.inputMode === "RATIO" ? Number(form.ratioPercent) : null,
-        memo: form.memo,
-        targetDate: form.targetDate,
-      };
+      try {
+        const payload = {
+          type: form.type,
+          category: form.category.trim(),
+          amount: form.type === "EXPENSE" && form.inputMode === "RATIO" ? 0 : Number(form.amount),
+          inputMode: form.type === "EXPENSE" ? form.inputMode : "AMOUNT",
+          ratioPercent: form.type === "EXPENSE" && form.inputMode === "RATIO" ? Number(form.ratioPercent) : null,
+          memo: form.memo,
+          targetDate: form.targetDate,
+        };
 
-      const response = await fetch("/api/finance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        setError(result.message ?? "항목 저장에 실패했습니다.");
-        return;
+        const response = await fetch("/api/finance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const { data, message } = await readApiResponse<{ entry?: FinanceItem; message?: string }>(response);
+        if (!response.ok || !data?.entry) {
+          setError(message ?? "항목 저장에 실패했습니다.");
+          return;
+        }
+
+        setItems((prev) => [data.entry!, ...prev]);
+        setSelectedDate(form.targetDate);
+        setForm((prev) => ({
+          ...prev,
+          amount: 0,
+          ratioPercent: 0,
+          memo: "",
+        }));
+        setActiveTab("entries");
+      } catch {
+        setError("재무 항목 저장 중 오류가 발생했습니다.");
       }
-
-      setItems((prev) => [result.entry, ...prev]);
-      setSelectedDate(form.targetDate);
-      setForm((prev) => ({
-        ...prev,
-        amount: 0,
-        ratioPercent: 0,
-        memo: "",
-      }));
-      setActiveTab("entries");
     });
   }
 
   async function saveSettings() {
     setSettingsMessage("");
     startSettingsTransition(async () => {
-      const response = await fetch("/api/finance-settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        setSettingsMessage(result.message ?? "재무 설정 저장에 실패했습니다.");
-        return;
+      try {
+        const response = await fetch("/api/finance-settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(settings),
+        });
+        const { data, message } = await readApiResponse<{ settings?: FinanceSettings; message?: string }>(response);
+        if (!response.ok || !data?.settings) {
+          setSettingsMessage(message ?? "재무 설정 저장에 실패했습니다.");
+          return;
+        }
+        setSettings(data.settings);
+        setSettingsMessage("재무 설정을 저장했습니다.");
+      } catch {
+        setSettingsMessage("재무 설정 저장 중 오류가 발생했습니다.");
       }
-      setSettings(result.settings);
-      setSettingsMessage("재무 설정을 저장했습니다.");
     });
   }
 
   async function saveEfficiency() {
     setEfficiencyMessage("");
     startEfficiencyTransition(async () => {
-      const response = await fetch("/api/schedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          timeUnit: scheduleConfig.timeUnit,
-          hourlySalesProjection: averagedProjection,
-          assignments: scheduleConfig.assignments,
-          seasonProfiles: scheduleConfig.seasonProfiles,
-          activeSeasonProfileId: scheduleConfig.activeSeasonProfileId,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        setEfficiencyMessage(result.message ?? "효율 분석 설정 저장에 실패했습니다.");
-        return;
+      try {
+        const response = await fetch("/api/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            timeUnit: scheduleConfig.timeUnit,
+            hourlySalesProjection: averagedProjection,
+            assignments: scheduleConfig.assignments,
+            seasonProfiles: scheduleConfig.seasonProfiles,
+            activeSeasonProfileId: scheduleConfig.activeSeasonProfileId,
+          }),
+        });
+        const { message } = await readApiResponse<{ message?: string }>(response);
+        if (!response.ok) {
+          setEfficiencyMessage(message ?? "효율 분석 설정 저장에 실패했습니다.");
+          return;
+        }
+        setEfficiencyMessage("효율 분석 설정을 저장했습니다.");
+      } catch {
+        setEfficiencyMessage("효율 분석 저장 중 오류가 발생했습니다.");
       }
-      setEfficiencyMessage("효율 분석 설정을 저장했습니다.");
     });
   }
 

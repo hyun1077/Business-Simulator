@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { requireApiRole } from "@/lib/auth";
 import { readAppData, writeAppData } from "@/lib/file-db";
 
 const bodySchema = z.object({
@@ -10,7 +10,8 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  const session = await requireRole("OWNER");
+  const session = await requireApiRole("OWNER");
+  if (session instanceof NextResponse) return session;
   const data = await readAppData();
   const store = data.stores.find((item) => item.id === session.storeId);
 
@@ -24,7 +25,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await requireRole("OWNER");
+  const session = await requireApiRole("OWNER");
+  if (session instanceof NextResponse) return session;
   const body = bodySchema.parse(await request.json());
   const data = await readAppData();
   const store = data.stores.find((item) => item.id === session.storeId);
