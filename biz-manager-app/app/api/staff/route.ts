@@ -18,6 +18,16 @@ const bodySchema = z.object({
   expectedMonthlyHours: z.number().int().min(1),
   insuranceType: z.enum(["NONE", "FREELANCER", "FOUR_INSURANCE"]),
   insuranceRate: z.number().min(0).max(100),
+  freelancerTaxRate: z.number().min(0).max(100).default(3.3),
+  nationalPensionEmployeeRate: z.number().min(0).max(100).default(0),
+  nationalPensionEmployerRate: z.number().min(0).max(100).default(0),
+  healthInsuranceEmployeeRate: z.number().min(0).max(100).default(0),
+  healthInsuranceEmployerRate: z.number().min(0).max(100).default(0),
+  longTermCareEmployeeRate: z.number().min(0).max(100).default(0),
+  longTermCareEmployerRate: z.number().min(0).max(100).default(0),
+  employmentInsuranceEmployeeRate: z.number().min(0).max(100).default(0),
+  employmentInsuranceEmployerRate: z.number().min(0).max(100).default(0),
+  industrialAccidentEmployerRate: z.number().min(0).max(100).default(0),
 });
 
 export async function GET() {
@@ -34,11 +44,18 @@ export async function POST(request: Request) {
   const data = await readAppData();
   const holidayWage = Math.round(body.baseWage * 0.2);
   const bonusWage = Math.max(0, body.targetWage - (body.baseWage + holidayWage));
+  const employerInsuranceRate =
+    Number(body.nationalPensionEmployerRate) +
+    Number(body.healthInsuranceEmployerRate) +
+    Number(body.longTermCareEmployerRate) +
+    Number(body.employmentInsuranceEmployerRate) +
+    Number(body.industrialAccidentEmployerRate);
 
   const staff = {
     id: createId(),
     storeId: session.storeId,
     ...body,
+    insuranceRate: employerInsuranceRate,
     capacity: body.expectedSales,
     incentive: body.performanceBonus,
     holidayWage,

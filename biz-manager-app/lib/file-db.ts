@@ -51,6 +51,16 @@ export type AppStaff = {
   expectedMonthlyHours: number;
   insuranceType: "NONE" | "FREELANCER" | "FOUR_INSURANCE";
   insuranceRate: number;
+  freelancerTaxRate: number;
+  nationalPensionEmployeeRate: number;
+  nationalPensionEmployerRate: number;
+  healthInsuranceEmployeeRate: number;
+  healthInsuranceEmployerRate: number;
+  longTermCareEmployeeRate: number;
+  longTermCareEmployerRate: number;
+  employmentInsuranceEmployeeRate: number;
+  employmentInsuranceEmployerRate: number;
+  industrialAccidentEmployerRate: number;
 };
 
 export type AppFinance = {
@@ -140,7 +150,24 @@ function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
               (member as Partial<AppStaff>).insuranceType === "FOUR_INSURANCE"
                 ? ((member as Partial<AppStaff>).insuranceType as "FREELANCER" | "FOUR_INSURANCE")
                 : "NONE",
-            insuranceRate: Number((member as Partial<AppStaff>).insuranceRate) || 0,
+            freelancerTaxRate: Number((member as Partial<AppStaff>).freelancerTaxRate) || 3.3,
+            nationalPensionEmployeeRate: Number((member as Partial<AppStaff>).nationalPensionEmployeeRate) || 0,
+            nationalPensionEmployerRate: Number((member as Partial<AppStaff>).nationalPensionEmployerRate) || 0,
+            healthInsuranceEmployeeRate: Number((member as Partial<AppStaff>).healthInsuranceEmployeeRate) || 0,
+            healthInsuranceEmployerRate: Number((member as Partial<AppStaff>).healthInsuranceEmployerRate) || 0,
+            longTermCareEmployeeRate: Number((member as Partial<AppStaff>).longTermCareEmployeeRate) || 0,
+            longTermCareEmployerRate: Number((member as Partial<AppStaff>).longTermCareEmployerRate) || 0,
+            employmentInsuranceEmployeeRate: Number((member as Partial<AppStaff>).employmentInsuranceEmployeeRate) || 0,
+            employmentInsuranceEmployerRate: Number((member as Partial<AppStaff>).employmentInsuranceEmployerRate) || 0,
+            industrialAccidentEmployerRate: Number((member as Partial<AppStaff>).industrialAccidentEmployerRate) || 0,
+            insuranceRate:
+              Number((member as Partial<AppStaff>).nationalPensionEmployerRate) +
+                Number((member as Partial<AppStaff>).healthInsuranceEmployerRate) +
+                Number((member as Partial<AppStaff>).longTermCareEmployerRate) +
+                Number((member as Partial<AppStaff>).employmentInsuranceEmployerRate) +
+                Number((member as Partial<AppStaff>).industrialAccidentEmployerRate) ||
+              Number((member as Partial<AppStaff>).insuranceRate) ||
+              0,
           };
         })
       : [],
