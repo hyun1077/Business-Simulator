@@ -281,7 +281,7 @@ export function StaffManager({
         </div>
 
         <div style={layout}>
-          <section style={box}>
+          <section style={panelBox}>
             <div style={splitHeader}>
               <div>
                 <h2 style={sectionTitle}>직원 등록</h2>
@@ -339,8 +339,8 @@ export function StaffManager({
               <button onClick={submit} disabled={pending || !form.name.trim()} style={primaryButton}>{pending ? "저장 중..." : "직원 저장"}</button>
             </div>
           </section>
-          <div style={{ display: "grid", gap: 16 }}>
-            <section style={box}>
+          <div style={rightColumn}>
+            <section style={panelBox}>
               <h2 style={sectionTitle}>직원 보상 구조</h2>
               <div style={chipRow}>
                 {staff.map((item) => (
@@ -375,7 +375,7 @@ export function StaffManager({
               )}
             </section>
 
-            <section style={box}>
+            <section style={panelBox}>
               <div style={splitHeader}>
                 <h2 style={sectionTitle}>직원 스케줄 달력</h2>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -409,7 +409,7 @@ export function StaffManager({
               )}
             </section>
 
-            <section style={box}>
+            <section style={panelBox}>
               <div style={splitHeader}>
                 <h2 style={sectionTitle}>근로계약서</h2>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -781,16 +781,17 @@ const eyebrow = { color: "#34d399", fontSize: 12, fontWeight: 700, letterSpacing
 const title = { margin: "8px 0", fontSize: 34, lineHeight: 1.2 } as const;
 const desc = { margin: 0, color: "#94a3b8", lineHeight: 1.7 } as const;
 const muted = { color: "#94a3b8" } as const;
-const layout = { display: "grid", gap: 16, gridTemplateColumns: "520px 1fr", alignItems: "start" } as const;
+const layout = { display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 520px) minmax(0, 1fr)", alignItems: "start" } as const;
 const metricGrid = { display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" } as const;
 const box = { padding: 20, borderRadius: 20, background: "#0f172a", border: "1px solid #1e293b" } as const;
+const panelBox = { ...box, minWidth: 0, overflow: "hidden", boxSizing: "border-box" } as const;
 const subtleBox = { padding: 14, borderRadius: 16, background: "#020617", border: "1px solid #1e293b" } as const;
 const fieldCard = { padding: 14, borderRadius: 16, background: "#020617", border: "1px solid #1e293b" } as const;
-const formGrid = { display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" } as const;
-const insuranceGrid = { display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" } as const;
+const formGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
+const insuranceGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
 const cardGrid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", marginBottom: 14 } as const;
 const stack = { display: "grid", gap: 12 } as const;
-const input = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 12, padding: "12px 14px" } as const;
+const input = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 12, padding: "12px 14px", width: "100%", boxSizing: "border-box" } as const;
 const miniInput = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 10, padding: "8px 10px" } as const;
 const textArea = { ...input, resize: "vertical", minHeight: 92, width: "100%" } as const;
 const chipRow = { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } as const;
@@ -810,3 +811,4 @@ const contractLayout = { display: "grid", gap: 16, gridTemplateColumns: "minmax(
 const previewBox = { padding: 16, borderRadius: 18, border: "1px solid #1e293b", background: "#020617" } as const;
 const previewText = { whiteSpace: "pre-wrap", lineHeight: 1.8, fontSize: 13, color: "#e2e8f0", fontFamily: "\"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif" } as const;
 const errorText = { color: "#fca5a5" } as const;
+const rightColumn = { display: "grid", gap: 16, minWidth: 0 } as const;
