@@ -409,7 +409,6 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
         <div className={styles.tabRow}>
           {[
             { id: "schedule", label: `스케줄 (${timeUnit}분)`, icon: Clock },
-            { id: "analysis", label: "효율 분석", icon: PieChart },
             { id: "summary", label: "월별 근무일지", icon: Calendar },
           ].map((item) => {
             const Icon = item.icon;
