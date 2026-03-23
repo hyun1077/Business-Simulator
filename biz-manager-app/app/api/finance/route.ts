@@ -12,6 +12,12 @@ const bodySchema = z.object({
   memo: z.string().optional(),
   targetDate: z.string().min(8),
 });
+const updateSchema = bodySchema.extend({
+  id: z.string().min(1),
+});
+const deleteSchema = z.object({
+  id: z.string().min(1),
+});
 
 export async function GET() {
   const session = await requireApiSession();
@@ -46,4 +52,44 @@ export async function POST(request: Request) {
   return NextResponse.json({
     entry,
   });
+}
+
+export async function PATCH(request: Request) {
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
+  const body = updateSchema.parse(await request.json());
+  const data = await readAppData();
+  const entry = data.finance.find((item) => item.id === body.id && item.storeId === session.storeId);
+
+  if (!entry) {
+    return NextResponse.json({ message: "수정할 항목을 찾지 못했습니다." }, { status: 404 });
+  }
+
+  entry.type = body.type;
+  entry.category = body.category;
+  entry.amount = body.amount;
+  entry.inputMode = body.inputMode;
+  entry.ratioPercent = body.inputMode === "RATIO" ? Number(body.ratioPercent) || 0 : null;
+  entry.memo = body.memo || null;
+  entry.targetDate = body.targetDate;
+  await writeAppData(data);
+
+  return NextResponse.json({ entry });
+}
+
+export async function DELETE(request: Request) {
+  const session = await requireApiSession();
+  if (session instanceof NextResponse) return session;
+  const body = deleteSchema.parse(await request.json());
+  const data = await readAppData();
+  const index = data.finance.findIndex((item) => item.id === body.id && item.storeId === session.storeId);
+
+  if (index < 0) {
+    return NextResponse.json({ message: "삭제할 항목을 찾지 못했습니다." }, { status: 404 });
+  }
+
+  data.finance.splice(index, 1);
+  await writeAppData(data);
+
+  return NextResponse.json({ id: body.id });
 }

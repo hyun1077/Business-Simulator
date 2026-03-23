@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { readAppData } from "@/lib/file-db";
-import { FinanceManager } from "@/components/finance-manager";
+import { FinanceWorkspace } from "@/components/finance-workspace";
 
 export default async function FinancePage() {
   const session = await requireRole("OWNER");
@@ -13,7 +13,7 @@ export default async function FinancePage() {
   const schedule = data.schedules.find((item) => item.storeId === session.storeId) ?? null;
 
   return (
-    <FinanceManager
+    <FinanceWorkspace
       initialItems={items}
       role={session.role}
       initialSettings={{

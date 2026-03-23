@@ -66,9 +66,24 @@ type ContractDraft = {
 };
 
 type StaffForm = Omit<StaffMember, "id" | "holidayWage" | "bonusWage" | "capacity" | "incentive">;
+type StaffFieldGuide = {
+  title: string;
+  description: string;
+};
 
 const WEEK = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CAL = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+const STAFF_FIELD_GUIDES: StaffFieldGuide[] = [
+  { title: "직원 이름", description: "계약서와 스케줄 표에 표시할 이름입니다." },
+  { title: "표시 색상", description: "스케줄 표에서 직원을 구분하는 색입니다." },
+  { title: "최저시급", description: "법정 최저시급 또는 실제 기본시급을 넣습니다." },
+  { title: "최종시급", description: "주휴수당, 상여를 반영한 목표 시급입니다." },
+  { title: "시간당 기대매출", description: "근무 1시간당 기대하는 매출 기여값입니다." },
+  { title: "성과급/수당", description: "성과급, 식비, 교통비, 기타수당을 월 기준으로 넣습니다." },
+  { title: "급여 방식", description: "시급제인지 월급제인지 선택합니다." },
+  { title: "보험/세금 방식", description: "프리랜서 3.3% 또는 4대보험 여부를 선택합니다." },
+];
 
 export function StaffManager({
   initialStaff,
@@ -297,6 +312,26 @@ export function StaffManager({
                   <div>시간당 기대매출: 이 직원이 한 시간 근무할 때 기대하는 매출 기여값입니다.</div>
                   <div>월급 총액과 예상 월 근로시간을 입력하면 월급제를 시급으로 환산해 보여줍니다.</div>
                   <div>프리랜서면 보통 3.3% 원천징수율을, 4대보험이면 근로자 부담과 회사 부담 비율을 각각 입력합니다.</div>
+                </div>
+              </div>
+              <div style={fieldGuideGrid}>
+                {STAFF_FIELD_GUIDES.map((item) => (
+                  <div key={item.title} style={fieldGuideCard}>
+                    <strong style={{ display: "block", marginBottom: 6 }}>{item.title}</strong>
+                    <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.55 }}>{item.description}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={subtleBox}>
+                <strong style={{ display: "block", marginBottom: 10 }}>입력 예시</strong>
+                <div style={{ display: "grid", gap: 8, color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 }}>
+                  <div>`직원 이름`: 예) 매니저 김민수, 평일 오픈 담당</div>
+                  <div>`최저시급/기본시급`: 법정 최저시급이나 계약 기본시급을 넣습니다. 예) `10030`</div>
+                  <div>`최종시급`: 주휴수당, 상여, 각종 수당까지 반영해서 실제 맞추고 싶은 시급입니다. 예) `12000`</div>
+                  <div>`시간당 기대매출`: 이 직원이 1시간 근무할 때 기대하는 매출입니다. 예) `100000`</div>
+                  <div>`성과급/식비/교통비/기타수당`: 월 단위로 별도 지급하는 금액입니다. 없으면 `0`으로 둡니다.</div>
+                  <div>`월급 총액/예상 월 근로시간`: 월급제일 때 실질 시급을 계산하는 기준입니다. 예) `2500000`, `160`</div>
+                  <div>`보험/세금 방식`: 프리랜서 3.3%인지, 4대보험인지 선택하면 아래 세부 비율 입력칸이 열립니다.</div>
                 </div>
               </div>
               <div style={formGrid}>
@@ -789,6 +824,8 @@ const subtleBox = { padding: 14, borderRadius: 16, background: "#020617", border
 const fieldCard = { padding: 14, borderRadius: 16, background: "#020617", border: "1px solid #1e293b" } as const;
 const formGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
 const insuranceGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
+const fieldGuideGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
+const fieldGuideCard = { padding: 12, borderRadius: 14, background: "#081121", border: "1px solid #22304a" } as const;
 const cardGrid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", marginBottom: 14 } as const;
 const stack = { display: "grid", gap: 12 } as const;
 const input = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 12, padding: "12px 14px", width: "100%", boxSizing: "border-box" } as const;
