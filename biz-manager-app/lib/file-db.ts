@@ -1,12 +1,18 @@
-import { promises as fs } from "fs";
+import { constants as fsConstants, promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import type { SystemRole } from "@/types/domain";
 
 const bundledDataFile = path.join(process.cwd(), "data", "app-data.json");
-const dataFile = process.env.VERCEL
-  ? path.join("/tmp", "biz-manager-app", "app-data.json")
-  : bundledDataFile;
+const tempDataFile = path.join("/tmp", "biz-manager-app", "app-data.json");
+const candidateDataFiles = Array.from(
+  new Set(
+    process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL
+      ? [tempDataFile, bundledDataFile]
+      : [bundledDataFile, tempDataFile],
+  ),
+);
+let resolvedDataFile: string | null = null;
 
 export type AppUser = {
   id: string;
@@ -116,19 +122,34 @@ const emptyData: AppData = {
 };
 
 async function ensureDataFile() {
-  await fs.mkdir(path.dirname(dataFile), { recursive: true });
-  try {
-    await fs.access(dataFile);
-  } catch {
-    let initialData = emptyData;
-    if (dataFile !== bundledDataFile) {
+  if (resolvedDataFile) return resolvedDataFile;
+
+  let lastError: unknown = null;
+
+  for (const dataFile of candidateDataFiles) {
+    try {
+      await fs.mkdir(path.dirname(dataFile), { recursive: true });
       try {
-        const bundled = await fs.readFile(bundledDataFile, "utf8");
-        initialData = normalizeAppData(JSON.parse(bundled) as Partial<AppData>);
-      } catch {}
+        await fs.access(dataFile, fsConstants.F_OK);
+      } catch {
+        let initialData = emptyData;
+        if (dataFile !== bundledDataFile) {
+          try {
+            const bundled = await fs.readFile(bundledDataFile, "utf8");
+            initialData = normalizeAppData(JSON.parse(bundled) as Partial<AppData>);
+          } catch {}
+        }
+        await fs.writeFile(dataFile, JSON.stringify(initialData, null, 2), "utf8");
+      }
+      await fs.access(dataFile, fsConstants.W_OK);
+      resolvedDataFile = dataFile;
+      return dataFile;
+    } catch (error) {
+      lastError = error;
     }
-    await fs.writeFile(dataFile, JSON.stringify(initialData, null, 2), "utf8");
   }
+
+  throw lastError ?? new Error("No writable data file available.");
 }
 
 function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
@@ -231,13 +252,13 @@ function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
 }
 
 export async function readAppData() {
-  await ensureDataFile();
+  const dataFile = await ensureDataFile();
   const content = await fs.readFile(dataFile, "utf8");
   return normalizeAppData(JSON.parse(content) as Partial<AppData>);
 }
 
 export async function writeAppData(data: AppData) {
-  await ensureDataFile();
+  const dataFile = await ensureDataFile();
   await fs.writeFile(dataFile, JSON.stringify(normalizeAppData(data), null, 2), "utf8");
 }
 
