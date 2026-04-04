@@ -23,6 +23,8 @@ type StaffMember = {
   employmentType: "HOURLY" | "MONTHLY";
   monthlySalary: number;
   expectedMonthlyHours: number;
+  weeklyWorkingHours: number;
+  weeklyWorkingDays: number;
   insuranceType: "NONE" | "FREELANCER" | "FOUR_INSURANCE";
   insuranceRate: number;
   freelancerTaxRate: number;
@@ -71,6 +73,8 @@ type IndustrialAccidentPreset = "GENERAL_SERVICE" | "RETAIL" | "RESTAURANT_CAFE"
 
 const WEEK = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CAL = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const MIN_WAGE_2026 = 10320;
+const WEEKS_PER_MONTH = 4.345;
 const INSURANCE_REFERENCE = [
   {
     name: "국민연금",
@@ -149,8 +153,8 @@ export function StaffManager({
   const [form, setForm] = useState<StaffForm>({
     name: "",
     color: "#10b981",
-    baseWage: 10030,
-    targetWage: 12000,
+    baseWage: MIN_WAGE_2026,
+    targetWage: MIN_WAGE_2026,
     expectedSales: 100000,
     performanceBonus: 0,
     mealAllowance: 0,
@@ -159,6 +163,8 @@ export function StaffManager({
     employmentType: "HOURLY",
     monthlySalary: 0,
     expectedMonthlyHours: 160,
+    weeklyWorkingHours: 20,
+    weeklyWorkingDays: 5,
     insuranceType: "NONE",
     insuranceRate: 0,
     freelancerTaxRate: 3.3,
@@ -280,12 +286,15 @@ export function StaffManager({
         setForm((prev) => ({
           ...prev,
           name: "",
-          targetWage: prev.employmentType === "HOURLY" ? prev.targetWage : 12000,
+          baseWage: MIN_WAGE_2026,
+          targetWage: MIN_WAGE_2026,
           monthlySalary: 0,
           performanceBonus: 0,
           mealAllowance: 0,
           transportAllowance: 0,
           otherAllowance: 0,
+          weeklyWorkingHours: 20,
+          weeklyWorkingDays: 5,
         }));
       } catch {
         setError("직원 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
@@ -442,8 +451,17 @@ export function StaffManager({
                 <div style={summaryRow}><span>주휴수당(시간당 환산)</span><strong>{getCalculatedHolidayWage(normalizedForm.baseWage).toLocaleString()}원</strong></div>
                 <div style={summaryRow}><span>최종시급 보정분</span><strong>{getCalculatedBonusWage(normalizedForm.baseWage, normalizedForm.targetWage).toLocaleString()}원</strong></div>
                 <div style={summaryRow}><span>설정된 보험/세금 방식</span><strong>{getInsuranceLabel(normalizedForm.insuranceType)}</strong></div>
-                <div style={summaryRow}><span>월급 환산 시급</span><strong>{getFormSalaryHourly(normalizedForm).toLocaleString()}원</strong></div>
-                <div style={summaryRow}><span>회사 기준 예상 실질 시급</span><strong>{getFormRealHourly(normalizedForm).toLocaleString()}원</strong></div>
+                {normalizedForm.employmentType === "MONTHLY" ? (
+                  <>
+                    <div style={summaryRow}><span>2026 기준 적정 월급</span><strong>{getMonthlySalaryGuide(normalizedForm).recommendedMonthlySalary.toLocaleString()}원</strong></div>
+                    <div style={summaryRow}><span>입력 월급과 차이</span><strong>{(normalizedForm.monthlySalary - getMonthlySalaryGuide(normalizedForm).recommendedMonthlySalary).toLocaleString()}원</strong></div>
+                  </>
+                ) : (
+                  <>
+                    <div style={summaryRow}><span>월급 환산 시급</span><strong>{getFormSalaryHourly(normalizedForm).toLocaleString()}원</strong></div>
+                    <div style={summaryRow}><span>회사 기준 예상 실질 시급</span><strong>{getFormRealHourly(normalizedForm).toLocaleString()}원</strong></div>
+                  </>
+                )}
               </div>
               {error ? <div style={errorText}>{error}</div> : null}
               {notice ? <div style={noticeText}>{notice}</div> : null}
@@ -465,20 +483,32 @@ export function StaffManager({
                 <div style={muted}>직원을 선택하면 상세 항목이 표시됩니다.</div>
               ) : (
                 <>
-                  <div style={cardGrid}>
-                    <Info label="최저시급" value={`${selectedStaff.baseWage.toLocaleString()}원`} />
-                    <Info label="주휴수당" value={`${selectedStaff.holidayWage.toLocaleString()}원`} />
-                    <Info label="상여" value={`${selectedStaff.bonusWage.toLocaleString()}원`} />
+                <div style={cardGrid}>
+                  <Info label="최저시급" value={`${selectedStaff.baseWage.toLocaleString()}원`} />
+                  <Info label="주휴수당" value={`${selectedStaff.holidayWage.toLocaleString()}원`} />
+                  <Info label="상여" value={`${selectedStaff.bonusWage.toLocaleString()}원`} />
+                  {selectedStaff.employmentType === "MONTHLY" ? (
+                    <Info label="월급 총액" value={`${selectedStaff.monthlySalary.toLocaleString()}원`} helper={`주 ${selectedStaff.weeklyWorkingHours.toLocaleString()}h / ${selectedStaff.weeklyWorkingDays}일`} />
+                  ) : (
                     <Info label="최종시급" value={`${selectedStaff.targetWage.toLocaleString()}원`} />
-                    <Info label="추가수당" value={`${summary.extraAllowance.toLocaleString()}원`} helper={`식비 ${selectedStaff.mealAllowance.toLocaleString()} / 교통비 ${selectedStaff.transportAllowance.toLocaleString()} / 기타 ${selectedStaff.otherAllowance.toLocaleString()}`} />
-                    <Info label="성과급" value={`${selectedStaff.performanceBonus.toLocaleString()}원`} />
-                    <Info label="보험 방식" value={getInsuranceLabel(selectedStaff.insuranceType)} helper={`회사 부담 합계 ${getEmployerInsuranceRate(selectedStaff).toFixed(2)}%`} />
-                    <Info label="근로자 공제 합계" value={`${getEmployeeInsuranceRate(selectedStaff).toFixed(2)}%`} />
+                  )}
+                  <Info label="추가수당" value={`${summary.extraAllowance.toLocaleString()}원`} helper={`식비 ${selectedStaff.mealAllowance.toLocaleString()} / 교통비 ${selectedStaff.transportAllowance.toLocaleString()} / 기타 ${selectedStaff.otherAllowance.toLocaleString()}`} />
+                  <Info label="성과급" value={`${selectedStaff.performanceBonus.toLocaleString()}원`} />
+                  <Info label="보험 방식" value={getInsuranceLabel(selectedStaff.insuranceType)} helper={`회사 부담 합계 ${getEmployerInsuranceRate(selectedStaff).toFixed(2)}%`} />
+                  <Info label="근로자 공제 합계" value={`${getEmployeeInsuranceRate(selectedStaff).toFixed(2)}%`} />
+                  {selectedStaff.employmentType === "MONTHLY" ? (
+                    <Info label="적정 월급(최저시급+주휴)" value={`${summary.salaryGuide.recommendedMonthlySalary.toLocaleString()}원`} helper={summary.salaryGuide.formula} />
+                  ) : (
                     <Info label="월급 환산 시급" value={`${summary.salaryHourly.toLocaleString()}원`} />
+                  )}
+                  {selectedStaff.employmentType === "MONTHLY" ? (
+                    <Info label="입력 월급과 차이" value={`${summary.monthlySalaryGap.toLocaleString()}원`} helper={`휴게 공제 ${summary.salaryGuide.weeklyBreakHours.toFixed(1)}h / 주휴 ${summary.salaryGuide.weeklyHolidayHours.toFixed(1)}h`} />
+                  ) : (
                     <Info label="실질 시급" value={`${summary.realHourly.toLocaleString()}원`} helper="회사 부담 비용 포함" />
-                    <Info label="월 총고용비" value={`${summary.employerMonthlyCost.toLocaleString()}원`} />
-                    <Info label="예상 월 기대매출" value={`${summary.monthlyExpectedSales.toLocaleString()}원`} />
-                  </div>
+                  )}
+                  <Info label="월 총고용비" value={`${summary.employerMonthlyCost.toLocaleString()}원`} />
+                  <Info label="예상 월 기대매출" value={`${summary.monthlyExpectedSales.toLocaleString()}원`} />
+                </div>
                   <div style={subtleBox}>
                     고용형태 {selectedStaff.employmentType === "MONTHLY" ? "월급제" : "시급제"} · 예상 월 근로시간 {selectedStaff.expectedMonthlyHours}시간 · 현재 선택 월 스케줄 기준 {actualMonthHours.toFixed(1)}시간
                   </div>
@@ -569,6 +599,8 @@ export function StaffManager({
 }
 
 function renderBasicFields(form: StaffForm, normalizedForm: StaffForm, setForm: (value: StaffForm) => void) {
+  const salaryGuide = getMonthlySalaryGuide(normalizedForm);
+  const monthlySalaryGap = normalizedForm.monthlySalary - salaryGuide.recommendedMonthlySalary;
   return (
     <>
       <FieldLabel title="직원 이름" description="계약서와 스케줄에 표시될 이름입니다.">
@@ -600,11 +632,20 @@ function renderBasicFields(form: StaffForm, normalizedForm: StaffForm, setForm: 
         </>
       ) : (
         <>
+          <FieldLabel title="1주일 총 근무시간" description="월급제 적정 금액 계산에 쓰는 주간 총 근무시간입니다. 휴게 전 총 배정시간 기준으로 넣습니다.">
+            <NumberInput value={form.weeklyWorkingHours} onChange={(value) => setForm({ ...form, weeklyWorkingHours: value })} placeholder="예: 25" />
+          </FieldLabel>
+          <FieldLabel title="1주일 근무일수" description="주간 근무시간을 몇 일에 나눠 일하는지 입력하면 휴게시간 공제를 자동 계산합니다.">
+            <NumberInput value={form.weeklyWorkingDays} onChange={(value) => setForm({ ...form, weeklyWorkingDays: value })} placeholder="예: 5" />
+          </FieldLabel>
           <FieldLabel title="월급 총액" description="월급제로 지급하는 총 세전 금액입니다.">
             <NumberInput value={form.monthlySalary} onChange={(value) => setForm({ ...form, monthlySalary: value })} placeholder="예: 2500000" />
           </FieldLabel>
-          <FieldLabel title="월급 환산 시급(자동 계산)" description="월급 총액을 예상 월 근로시간으로 나눈 환산 시급입니다.">
-            <StaticValue value={`${normalizedForm.targetWage.toLocaleString()}원`} helper="월급제에서는 최종시급이 이 값으로 자동 맞춰집니다." />
+          <FieldLabel title="적정 월급(최저시급 + 주휴 포함)" description="2026년 최저임금 10,320원 기준으로 휴게시간을 공제하고 주휴수당까지 포함해 계산한 권장 월급입니다.">
+            <StaticValue value={`${salaryGuide.recommendedMonthlySalary.toLocaleString()}원`} helper={salaryGuide.formula} />
+          </FieldLabel>
+          <FieldLabel title="월급 차이(입력값 - 적정금액)" description="현재 입력한 월급이 적정 월급보다 얼마나 높은지 또는 낮은지 바로 확인합니다.">
+            <StaticValue value={`${monthlySalaryGap.toLocaleString()}원`} helper={`주간 실근로 ${salaryGuide.weeklyNetHours.toFixed(1)}h · 주휴 ${salaryGuide.weeklyHolidayHours.toFixed(1)}h`} />
           </FieldLabel>
         </>
       )}
@@ -750,6 +791,8 @@ function normalizeStaffForm(
   customIndustrialAccidentRate: number,
 ): StaffForm {
   const expectedMonthlyHours = Math.max(1, Number(form.expectedMonthlyHours) || 160);
+  const weeklyWorkingHours = Math.max(0, Number(form.weeklyWorkingHours) || 0);
+  const weeklyWorkingDays = Math.min(7, Math.max(1, Number(form.weeklyWorkingDays) || 5));
   const targetWage =
     form.employmentType === "MONTHLY" && Number(form.monthlySalary) > 0
       ? Math.round(Number(form.monthlySalary) / expectedMonthlyHours)
@@ -763,6 +806,8 @@ function normalizeStaffForm(
       targetWage,
       monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
       expectedMonthlyHours,
+      weeklyWorkingHours,
+      weeklyWorkingDays,
       freelancerTaxRate: 3.3,
       nationalPensionEmployeeRate: 4.75,
       nationalPensionEmployerRate: 4.75,
@@ -783,6 +828,8 @@ function normalizeStaffForm(
       targetWage,
       monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
       expectedMonthlyHours,
+      weeklyWorkingHours,
+      weeklyWorkingDays,
       freelancerTaxRate: 3.3,
       nationalPensionEmployeeRate: 0,
       nationalPensionEmployerRate: 0,
@@ -798,11 +845,13 @@ function normalizeStaffForm(
   }
 
   return {
-    ...form,
-    targetWage,
-    monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
-    expectedMonthlyHours,
-    freelancerTaxRate: 3.3,
+      ...form,
+      targetWage,
+      monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
+      expectedMonthlyHours,
+      weeklyWorkingHours,
+      weeklyWorkingDays,
+      freelancerTaxRate: 3.3,
     nationalPensionEmployeeRate: 0,
     nationalPensionEmployerRate: 0,
     healthInsuranceEmployeeRate: 0,
@@ -866,6 +915,35 @@ function getFormRealHourly(form: StaffForm) {
   return hours > 0 ? Math.round(employerCost / hours) : getDisplayedFinalHourly(form);
 }
 
+function getMonthlySalaryGuide(member: Pick<StaffMember, "weeklyWorkingHours" | "weeklyWorkingDays">) {
+  const weeklyHours = Math.max(0, Number(member.weeklyWorkingHours) || 0);
+  const weeklyDays = Math.min(7, Math.max(1, Number(member.weeklyWorkingDays) || 5));
+  const averageDailyHours = weeklyDays > 0 ? weeklyHours / weeklyDays : 0;
+  const breakPerDay = averageDailyHours > 8 ? 1 : averageDailyHours > 4 ? 0.5 : 0;
+  const weeklyBreakHours = Math.min(weeklyHours, breakPerDay * weeklyDays);
+  const weeklyNetHours = Math.max(0, weeklyHours - weeklyBreakHours);
+  const weeklyHolidayHours = weeklyNetHours >= 15 ? weeklyNetHours / weeklyDays : 0;
+  const weeklyPaidHours = weeklyNetHours + weeklyHolidayHours;
+  const recommendedMonthlySalary = Math.round(MIN_WAGE_2026 * weeklyPaidHours * WEEKS_PER_MONTH);
+  const monthlyWorkHours = Math.round(weeklyNetHours * WEEKS_PER_MONTH * 100) / 100;
+  const monthlyHolidayHours = Math.round(weeklyHolidayHours * WEEKS_PER_MONTH * 100) / 100;
+
+  return {
+    weeklyHours,
+    weeklyDays,
+    averageDailyHours,
+    breakPerDay,
+    weeklyBreakHours,
+    weeklyNetHours,
+    weeklyHolidayHours,
+    weeklyPaidHours,
+    monthlyWorkHours,
+    monthlyHolidayHours,
+    recommendedMonthlySalary,
+    formula: `${MIN_WAGE_2026.toLocaleString()}원 x (${weeklyNetHours.toFixed(1)}h + 주휴 ${weeklyHolidayHours.toFixed(1)}h) x ${WEEKS_PER_MONTH}`,
+  };
+}
+
 function getStaffSummary(member: StaffMember, hours: number) {
   const workingHours = hours > 0 ? hours : member.expectedMonthlyHours;
   const extraAllowance = member.mealAllowance + member.transportAllowance + member.otherAllowance;
@@ -875,7 +953,9 @@ function getStaffSummary(member: StaffMember, hours: number) {
   const employerMonthlyCost = Math.round(subtotal * (1 + getEmployerInsuranceRate(member) / 100));
   const realHourly = workingHours > 0 ? Math.round(employerMonthlyCost / workingHours) : salaryHourly;
   const monthlyExpectedSales = Math.round((member.expectedSales || member.capacity || 0) * workingHours);
-  return { extraAllowance, salaryHourly, realHourly, employerMonthlyCost, monthlyExpectedSales, workingHours };
+  const salaryGuide = getMonthlySalaryGuide(member);
+  const monthlySalaryGap = member.monthlySalary - salaryGuide.recommendedMonthlySalary;
+  return { extraAllowance, salaryHourly, realHourly, employerMonthlyCost, monthlyExpectedSales, workingHours, salaryGuide, monthlySalaryGap };
 }
 
 function createDraft(member: StaffMember | null, storeInfo: StoreInfo): ContractDraft {

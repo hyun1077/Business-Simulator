@@ -49,6 +49,8 @@ export type AppStaff = {
   employmentType: "HOURLY" | "MONTHLY";
   monthlySalary: number;
   expectedMonthlyHours: number;
+  weeklyWorkingHours: number;
+  weeklyWorkingDays: number;
   insuranceType: "NONE" | "FREELANCER" | "FOUR_INSURANCE";
   insuranceRate: number;
   freelancerTaxRate: number;
@@ -145,6 +147,8 @@ function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
             employmentType: (member as Partial<AppStaff>).employmentType === "MONTHLY" ? "MONTHLY" : "HOURLY",
             monthlySalary: Number((member as Partial<AppStaff>).monthlySalary) || 0,
             expectedMonthlyHours: Number((member as Partial<AppStaff>).expectedMonthlyHours) || 160,
+            weeklyWorkingHours: Number((member as Partial<AppStaff>).weeklyWorkingHours) || Math.round(((Number((member as Partial<AppStaff>).expectedMonthlyHours) || 160) / 4.345) * 10) / 10,
+            weeklyWorkingDays: Number((member as Partial<AppStaff>).weeklyWorkingDays) || 5,
             insuranceType:
               (member as Partial<AppStaff>).insuranceType === "FREELANCER" ||
               (member as Partial<AppStaff>).insuranceType === "FOUR_INSURANCE"

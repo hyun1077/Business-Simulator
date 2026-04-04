@@ -16,6 +16,8 @@ const bodySchema = z.object({
   employmentType: z.enum(["HOURLY", "MONTHLY"]),
   monthlySalary: z.number().int().min(0),
   expectedMonthlyHours: z.number().int().min(1),
+  weeklyWorkingHours: z.number().min(0),
+  weeklyWorkingDays: z.number().int().min(1).max(7),
   insuranceType: z.enum(["NONE", "FREELANCER", "FOUR_INSURANCE"]),
   insuranceRate: z.number().min(0).max(100),
   freelancerTaxRate: z.number().min(0).max(100).default(3.3),
