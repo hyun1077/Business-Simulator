@@ -66,24 +66,48 @@ type ContractDraft = {
 };
 
 type StaffForm = Omit<StaffMember, "id" | "holidayWage" | "bonusWage" | "capacity" | "incentive">;
-type StaffFieldGuide = {
-  title: string;
-  description: string;
-};
 
 const WEEK = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CAL = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const INSURANCE_REFERENCE = [
+  {
+    name: "국민연금",
+    employee: "4.75%",
+    employer: "4.75%",
+    note: "기준소득월액 기준으로 계산됩니다. 2025년 7월~2026년 6월 기준 하한 40만원, 상한 637만원이 적용됩니다.",
+  },
+  {
+    name: "건강보험",
+    employee: "3.595%",
+    employer: "3.595%",
+    note: "직장가입자 보수월액 기준입니다. 실제 공제액은 보수와 정산 결과에 따라 달라질 수 있습니다.",
+  },
+  {
+    name: "장기요양보험",
+    employee: "건강보험료의 13.14% (약 0.472%)",
+    employer: "건강보험료의 13.14% (약 0.472%)",
+    note: "건강보험료에 곱해 계산합니다. 화면 입력은 임금 환산값(약 0.472%)으로 넣으면 계산이 편합니다.",
+  },
+  {
+    name: "고용보험",
+    employee: "0.90%",
+    employer: "0.90% + 사업장 규모별 0.25~0.85%",
+    note: "회사 부담 입력칸에는 실업급여 0.9%와 사업주 추가분을 합친 총 부담률을 넣는 것이 실무상 편합니다.",
+  },
+  {
+    name: "산재보험",
+    employee: "없음",
+    employer: "업종별 상이",
+    note: "근로자 부담은 없고 회사만 부담합니다. 음식점, 소매업, 제조업, 건설업 등 업종별 요율이 다릅니다.",
+  },
+] as const;
 
-const STAFF_FIELD_GUIDES: StaffFieldGuide[] = [
-  { title: "직원 이름", description: "계약서와 스케줄 표에 표시할 이름입니다." },
-  { title: "표시 색상", description: "스케줄 표에서 직원을 구분하는 색입니다." },
-  { title: "최저시급", description: "법정 최저시급 또는 실제 기본시급을 넣습니다." },
-  { title: "최종시급", description: "주휴수당, 상여를 반영한 목표 시급입니다." },
-  { title: "시간당 기대매출", description: "근무 1시간당 기대하는 매출 기여값입니다." },
-  { title: "성과급/수당", description: "성과급, 식비, 교통비, 기타수당을 월 기준으로 넣습니다." },
-  { title: "급여 방식", description: "시급제인지 월급제인지 선택합니다." },
-  { title: "보험/세금 방식", description: "프리랜서 3.3% 또는 4대보험 여부를 선택합니다." },
-];
+const EMPLOYMENT_INSURANCE_GUIDE = [
+  { scope: "150인 미만", rate: "1.15%", note: "실업급여 0.9% + 사업주 추가 0.25%" },
+  { scope: "150인 이상 우선지원", rate: "1.35%", note: "실업급여 0.9% + 사업주 추가 0.45%" },
+  { scope: "150인 이상~1000인 미만", rate: "1.55%", note: "실업급여 0.9% + 사업주 추가 0.65%" },
+  { scope: "1000인 이상/공공", rate: "1.75%", note: "실업급여 0.9% + 사업주 추가 0.85%" },
+] as const;
 
 export function StaffManager({
   initialStaff,
@@ -300,38 +324,59 @@ export function StaffManager({
             <div style={splitHeader}>
               <div>
                 <h2 style={sectionTitle}>직원 등록</h2>
-                <p style={helpText}>입력칸마다 어떤 값을 넣는지 설명을 붙였습니다. 4대보험을 쓰면 아래 세부 보험 항목도 같이 저장됩니다.</p>
+                <p style={helpText}>입력칸 이름 아래 설명만 남기고, 큰 가이드 대신 2026년 기준 4대보험 참고 요율과 적용 기준을 같이 보이도록 정리했습니다.</p>
               </div>
             </div>
             <div style={stack}>
               <div style={subtleBox}>
-                <strong style={{ display: "block", marginBottom: 10 }}>입력 가이드</strong>
-                <div style={{ display: "grid", gap: 8, color: "#cbd5e1", lineHeight: 1.6, fontSize: 13 }}>
-                  <div>기본시급: 법정 최저시급 또는 실제 계약 기본시급을 넣습니다.</div>
-                  <div>최종시급: 주휴수당, 상여, 각종 수당을 반영했을 때 맞추고 싶은 최종 시급입니다.</div>
-                  <div>시간당 기대매출: 이 직원이 한 시간 근무할 때 기대하는 매출 기여값입니다.</div>
-                  <div>월급 총액과 예상 월 근로시간을 입력하면 월급제를 시급으로 환산해 보여줍니다.</div>
-                  <div>프리랜서면 보통 3.3% 원천징수율을, 4대보험이면 근로자 부담과 회사 부담 비율을 각각 입력합니다.</div>
-                </div>
-              </div>
-              <div style={fieldGuideGrid}>
-                {STAFF_FIELD_GUIDES.map((item) => (
-                  <div key={item.title} style={fieldGuideCard}>
-                    <strong style={{ display: "block", marginBottom: 6 }}>{item.title}</strong>
-                    <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.55 }}>{item.description}</div>
+                <div style={guideHeader}>
+                  <div>
+                    <strong style={{ display: "block", marginBottom: 6 }}>2026년 4대보험 참고 요율</strong>
+                    <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6 }}>
+                      아래 값은 직원 등록 시 바로 참고할 수 있는 실무용 기준입니다. 각 입력칸에는 직원 부담률과 회사 부담률을 따로 넣고, 사업장 규모나 업종에 따라 달라지는 항목은 매장 기준으로 조정하세요.
+                    </div>
                   </div>
-                ))}
-              </div>
-              <div style={subtleBox}>
-                <strong style={{ display: "block", marginBottom: 10 }}>입력 예시</strong>
-                <div style={{ display: "grid", gap: 8, color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 }}>
-                  <div>`직원 이름`: 예) 매니저 김민수, 평일 오픈 담당</div>
-                  <div>`최저시급/기본시급`: 법정 최저시급이나 계약 기본시급을 넣습니다. 예) `10030`</div>
-                  <div>`최종시급`: 주휴수당, 상여, 각종 수당까지 반영해서 실제 맞추고 싶은 시급입니다. 예) `12000`</div>
-                  <div>`시간당 기대매출`: 이 직원이 1시간 근무할 때 기대하는 매출입니다. 예) `100000`</div>
-                  <div>`성과급/식비/교통비/기타수당`: 월 단위로 별도 지급하는 금액입니다. 없으면 `0`으로 둡니다.</div>
-                  <div>`월급 총액/예상 월 근로시간`: 월급제일 때 실질 시급을 계산하는 기준입니다. 예) `2500000`, `160`</div>
-                  <div>`보험/세금 방식`: 프리랜서 3.3%인지, 4대보험인지 선택하면 아래 세부 비율 입력칸이 열립니다.</div>
+                  <button
+                    type="button"
+                    onClick={() => setForm(applySuggestedInsuranceRates(form))}
+                    style={secondaryButton}
+                  >
+                    소규모 매장 기본값 적용
+                  </button>
+                </div>
+                <div style={insuranceGuideGrid}>
+                  {INSURANCE_REFERENCE.map((item) => (
+                    <div key={item.name} style={insuranceGuideCard}>
+                      <div style={{ fontWeight: 700, marginBottom: 8 }}>{item.name}</div>
+                      <div style={insuranceGuideLine}>
+                        <span style={insuranceGuideLabel}>개인 부담</span>
+                        <strong>{item.employee}</strong>
+                      </div>
+                      <div style={insuranceGuideLine}>
+                        <span style={insuranceGuideLabel}>회사 부담</span>
+                        <strong>{item.employer}</strong>
+                      </div>
+                      <div style={insuranceGuideNote}>{item.note}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={insuranceNotesWrap}>
+                  <div style={insuranceNoteCard}>
+                    <strong style={{ display: "block", marginBottom: 8 }}>소득에 따라 달라지는 부분</strong>
+                    <div style={insuranceBullet}>국민연금은 기준소득월액 기준이라 월 보수가 하한 40만원보다 낮거나 상한 637만원보다 높으면 실제 체감 비율이 달라집니다.</div>
+                    <div style={insuranceBullet}>건강보험과 장기요양보험은 보수월액 기준이라 급여 총액, 보수 정산, 육아휴직/입퇴사 여부에 따라 실제 공제액이 달라질 수 있습니다.</div>
+                    <div style={insuranceBullet}>산재보험은 개인 소득보다 업종 분류 영향이 큽니다. 음식점, 소매업, 제조업, 건설업마다 요율이 다릅니다.</div>
+                  </div>
+                  <div style={insuranceNoteCard}>
+                    <strong style={{ display: "block", marginBottom: 8 }}>고용보험 회사 부담 예시</strong>
+                    {EMPLOYMENT_INSURANCE_GUIDE.map((item) => (
+                      <div key={item.scope} style={employmentGuideRow}>
+                        <span>{item.scope}</span>
+                        <strong>{item.rate}</strong>
+                        <span style={{ color: "#64748b" }}>{item.note}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div style={formGrid}>
@@ -365,6 +410,8 @@ export function StaffManager({
                 </div>
               ) : null}
               <div style={subtleBox}>
+                <div style={summaryRow}><span>주휴수당(시간당 환산)</span><strong>{getCalculatedHolidayWage(form.baseWage).toLocaleString()}원</strong></div>
+                <div style={summaryRow}><span>최종시급 보정분</span><strong>{getCalculatedBonusWage(form.baseWage, form.targetWage).toLocaleString()}원</strong></div>
                 <div style={summaryRow}><span>설정된 보험/세금 방식</span><strong>{getInsuranceLabel(form.insuranceType)}</strong></div>
                 <div style={summaryRow}><span>월급 환산 시급</span><strong>{getFormSalaryHourly(form).toLocaleString()}원</strong></div>
                 <div style={summaryRow}><span>회사 기준 예상 실질 시급</span><strong>{getFormRealHourly(form).toLocaleString()}원</strong></div>
@@ -504,8 +551,14 @@ function renderBasicFields(form: StaffForm, setForm: (value: StaffForm) => void)
       <FieldLabel title="최저시급 또는 기본시급" description="법정 최저시급 또는 실제 기본시급을 입력합니다.">
         <NumberInput value={form.baseWage} onChange={(value) => setForm({ ...form, baseWage: value })} placeholder="예: 10030" />
       </FieldLabel>
+      <FieldLabel title="주휴수당(자동 계산)" description="기본시급의 20%를 시간당 주휴수당 환산값으로 보여줍니다.">
+        <StaticValue value={`${getCalculatedHolidayWage(form.baseWage).toLocaleString()}원`} helper="기본시급을 바꾸면 자동으로 같이 바뀝니다." />
+      </FieldLabel>
       <FieldLabel title="최종시급" description="주휴수당, 상여를 포함해 실제로 맞추고 싶은 최종 시급입니다.">
         <NumberInput value={form.targetWage} onChange={(value) => setForm({ ...form, targetWage: value })} placeholder="예: 12000" />
+      </FieldLabel>
+      <FieldLabel title="상여/보정분(자동 계산)" description="최종시급이 기본시급 + 주휴수당보다 높으면 차액을 자동 계산합니다.">
+        <StaticValue value={`${getCalculatedBonusWage(form.baseWage, form.targetWage).toLocaleString()}원`} helper="직원 보상 구조의 상여 항목과 연결됩니다." />
       </FieldLabel>
       <FieldLabel title="시간당 기대매출" description="이 직원이 근무할 때 기대하는 시간당 매출 기여값입니다.">
         <NumberInput value={form.expectedSales} onChange={(value) => setForm({ ...form, expectedSales: value })} placeholder="예: 100000" />
@@ -549,30 +602,30 @@ function renderInsuranceFields(form: StaffForm, setForm: (value: StaffForm) => v
   return (
     <>
       <FieldLabel title="국민연금 근로자 부담률" description="급여에서 근로자가 부담하는 국민연금 비율입니다.">
-        <NumberInput value={form.nationalPensionEmployeeRate} onChange={(value) => setForm({ ...form, nationalPensionEmployeeRate: value })} placeholder="예: 4.5" />
+        <NumberInput value={form.nationalPensionEmployeeRate} onChange={(value) => setForm({ ...form, nationalPensionEmployeeRate: value })} placeholder="예: 4.75" />
       </FieldLabel>
       <FieldLabel title="국민연금 회사 부담률" description="사업주가 부담하는 국민연금 비율입니다.">
-        <NumberInput value={form.nationalPensionEmployerRate} onChange={(value) => setForm({ ...form, nationalPensionEmployerRate: value })} placeholder="예: 4.5" />
+        <NumberInput value={form.nationalPensionEmployerRate} onChange={(value) => setForm({ ...form, nationalPensionEmployerRate: value })} placeholder="예: 4.75" />
       </FieldLabel>
       <FieldLabel title="건강보험 근로자 부담률" description="급여에서 공제되는 건강보험 비율입니다.">
-        <NumberInput value={form.healthInsuranceEmployeeRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployeeRate: value })} placeholder="예: 3.5" />
+        <NumberInput value={form.healthInsuranceEmployeeRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployeeRate: value })} placeholder="예: 3.595" />
       </FieldLabel>
       <FieldLabel title="건강보험 회사 부담률" description="사업주가 부담하는 건강보험 비율입니다.">
-        <NumberInput value={form.healthInsuranceEmployerRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployerRate: value })} placeholder="예: 3.5" />
+        <NumberInput value={form.healthInsuranceEmployerRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployerRate: value })} placeholder="예: 3.595" />
       </FieldLabel>
       <FieldLabel title="장기요양 근로자 부담률" description="건강보험과 별도로 공제되는 장기요양보험 비율입니다.">
-        <NumberInput value={form.longTermCareEmployeeRate} onChange={(value) => setForm({ ...form, longTermCareEmployeeRate: value })} placeholder="예: 0.45" />
+        <NumberInput value={form.longTermCareEmployeeRate} onChange={(value) => setForm({ ...form, longTermCareEmployeeRate: value })} placeholder="예: 0.472" />
       </FieldLabel>
       <FieldLabel title="장기요양 회사 부담률" description="사업주가 부담하는 장기요양보험 비율입니다.">
-        <NumberInput value={form.longTermCareEmployerRate} onChange={(value) => setForm({ ...form, longTermCareEmployerRate: value })} placeholder="예: 0.45" />
+        <NumberInput value={form.longTermCareEmployerRate} onChange={(value) => setForm({ ...form, longTermCareEmployerRate: value })} placeholder="예: 0.472" />
       </FieldLabel>
       <FieldLabel title="고용보험 근로자 부담률" description="급여에서 공제되는 고용보험 비율입니다.">
         <NumberInput value={form.employmentInsuranceEmployeeRate} onChange={(value) => setForm({ ...form, employmentInsuranceEmployeeRate: value })} placeholder="예: 0.9" />
       </FieldLabel>
-      <FieldLabel title="고용보험 회사 부담률" description="사업주가 부담하는 고용보험 비율입니다.">
-        <NumberInput value={form.employmentInsuranceEmployerRate} onChange={(value) => setForm({ ...form, employmentInsuranceEmployerRate: value })} placeholder="예: 0.9" />
+      <FieldLabel title="고용보험 회사 부담률" description="실업급여 0.9%와 사업장 규모별 추가분을 합친 총 회사 부담률을 넣습니다.">
+        <NumberInput value={form.employmentInsuranceEmployerRate} onChange={(value) => setForm({ ...form, employmentInsuranceEmployerRate: value })} placeholder="예: 1.15" />
       </FieldLabel>
-      <FieldLabel title="산재보험 회사 부담률" description="산재보험은 보통 회사만 부담합니다.">
+      <FieldLabel title="산재보험 회사 부담률" description="근로자 부담은 없고 회사만 부담합니다. 업종별 요율을 입력합니다.">
         <NumberInput value={form.industrialAccidentEmployerRate} onChange={(value) => setForm({ ...form, industrialAccidentEmployerRate: value })} placeholder="예: 0.7" />
       </FieldLabel>
     </>
@@ -609,6 +662,31 @@ function getEmployeeInsuranceRate(member: Pick<StaffMember, "insuranceType" | "f
     Number(member.longTermCareEmployeeRate) +
     Number(member.employmentInsuranceEmployeeRate)
   );
+}
+
+function getCalculatedHolidayWage(baseWage: number) {
+  return Math.round((Number(baseWage) || 0) * 0.2);
+}
+
+function getCalculatedBonusWage(baseWage: number, targetWage: number) {
+  const holidayWage = getCalculatedHolidayWage(baseWage);
+  return Math.max(0, (Number(targetWage) || 0) - ((Number(baseWage) || 0) + holidayWage));
+}
+
+function applySuggestedInsuranceRates(form: StaffForm): StaffForm {
+  return {
+    ...form,
+    insuranceType: "FOUR_INSURANCE",
+    nationalPensionEmployeeRate: 4.75,
+    nationalPensionEmployerRate: 4.75,
+    healthInsuranceEmployeeRate: 3.595,
+    healthInsuranceEmployerRate: 3.595,
+    longTermCareEmployeeRate: 0.472,
+    longTermCareEmployerRate: 0.472,
+    employmentInsuranceEmployeeRate: 0.9,
+    employmentInsuranceEmployerRate: 1.15,
+    industrialAccidentEmployerRate: 0,
+  };
 }
 
 function getEmployerInsuranceRate(member: Pick<StaffMember, "insuranceType" | "nationalPensionEmployerRate" | "healthInsuranceEmployerRate" | "longTermCareEmployerRate" | "employmentInsuranceEmployerRate" | "industrialAccidentEmployerRate">) {
@@ -801,6 +879,15 @@ function FieldLabel({ title, description, children }: { title: string; descripti
   );
 }
 
+function StaticValue({ value, helper }: { value: string; helper?: string }) {
+  return (
+    <div style={staticValueBox}>
+      <strong style={{ fontSize: 18 }}>{value}</strong>
+      {helper ? <div style={{ color: "#64748b", fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{helper}</div> : null}
+    </div>
+  );
+}
+
 function TextInput({ value, onChange, placeholder, disabled }: { value: string; onChange: (value: string) => void; placeholder: string; disabled?: boolean }) {
   return <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} disabled={disabled} style={{ ...input, opacity: disabled ? 0.55 : 1 }} />;
 }
@@ -824,11 +911,10 @@ const subtleBox = { padding: 14, borderRadius: 16, background: "#020617", border
 const fieldCard = { padding: 14, borderRadius: 16, background: "#020617", border: "1px solid #1e293b" } as const;
 const formGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
 const insuranceGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
-const fieldGuideGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
-const fieldGuideCard = { padding: 12, borderRadius: 14, background: "#081121", border: "1px solid #22304a" } as const;
 const cardGrid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", marginBottom: 14 } as const;
 const stack = { display: "grid", gap: 12 } as const;
 const input = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 12, padding: "12px 14px", width: "100%", boxSizing: "border-box" } as const;
+const staticValueBox = { ...input, display: "grid", alignItems: "center", minHeight: 74 } as const;
 const miniInput = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 10, padding: "8px 10px" } as const;
 const textArea = { ...input, resize: "vertical", minHeight: 92, width: "100%" } as const;
 const chipRow = { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 } as const;
@@ -837,9 +923,19 @@ const primaryButton = { background: "#10b981", color: "#052e16", border: "none",
 const secondaryButton = { background: "#020617", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 12, padding: "12px 14px", fontWeight: 600, cursor: "pointer" } as const;
 const sectionTitle = { margin: 0 } as const;
 const splitHeader = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14, flexWrap: "wrap" } as const;
+const guideHeader = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap", marginBottom: 14 } as const;
 const helpText = { margin: "6px 0 0", color: "#94a3b8", lineHeight: 1.6 } as const;
 const summaryRow = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" } as const;
 const noticeText = { color: "#a7f3d0" } as const;
+const insuranceGuideGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: 12 } as const;
+const insuranceGuideCard = { padding: 12, borderRadius: 14, background: "#081121", border: "1px solid #22304a", display: "grid", gap: 8 } as const;
+const insuranceGuideLine = { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" } as const;
+const insuranceGuideLabel = { color: "#94a3b8", fontSize: 12 } as const;
+const insuranceGuideNote = { color: "#94a3b8", fontSize: 12, lineHeight: 1.55 } as const;
+const insuranceNotesWrap = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" } as const;
+const insuranceNoteCard = { padding: 12, borderRadius: 14, background: "#081121", border: "1px solid #22304a" } as const;
+const insuranceBullet = { color: "#cbd5e1", fontSize: 12, lineHeight: 1.65, marginTop: 6 } as const;
+const employmentGuideRow = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", columnGap: 10, rowGap: 2, alignItems: "center", paddingTop: 8 } as const;
 const weekGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", marginBottom: 16 } as const;
 const calendarGrid = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8 } as const;
 const dayHead = { textAlign: "center", fontSize: 12, color: "#64748b", paddingBottom: 6 } as const;
