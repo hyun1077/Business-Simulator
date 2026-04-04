@@ -66,6 +66,8 @@ type ContractDraft = {
 };
 
 type StaffForm = Omit<StaffMember, "id" | "holidayWage" | "bonusWage" | "capacity" | "incentive">;
+type EmploymentInsuranceScale = "UNDER_150" | "PRIORITY_SUPPORT" | "MID_SIZED" | "LARGE_PUBLIC";
+type IndustrialAccidentPreset = "GENERAL_SERVICE" | "RETAIL" | "RESTAURANT_CAFE" | "MANUFACTURING" | "CUSTOM";
 
 const WEEK = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CAL = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -109,6 +111,20 @@ const EMPLOYMENT_INSURANCE_GUIDE = [
   { scope: "1000인 이상/공공", rate: "1.75%", note: "실업급여 0.9% + 사업주 추가 0.85%" },
 ] as const;
 
+const EMPLOYMENT_INSURANCE_RATE_MAP: Record<EmploymentInsuranceScale, { label: string; employerRate: number; note: string }> = {
+  UNDER_150: { label: "150인 미만", employerRate: 1.15, note: "실업급여 0.9% + 사업주 추가 0.25%" },
+  PRIORITY_SUPPORT: { label: "150인 이상 우선지원", employerRate: 1.35, note: "실업급여 0.9% + 사업주 추가 0.45%" },
+  MID_SIZED: { label: "150인 이상~1000인 미만", employerRate: 1.55, note: "실업급여 0.9% + 사업주 추가 0.65%" },
+  LARGE_PUBLIC: { label: "1000인 이상/공공", employerRate: 1.75, note: "실업급여 0.9% + 사업주 추가 0.85%" },
+};
+
+const INDUSTRIAL_ACCIDENT_RATE_MAP: Record<Exclude<IndustrialAccidentPreset, "CUSTOM">, { label: string; rate: number; note: string }> = {
+  GENERAL_SERVICE: { label: "일반 사무/서비스", rate: 0.25, note: "사무직·일반 서비스업 기준으로 많이 쓰는 보수적 예시값입니다." },
+  RETAIL: { label: "소매/판매", rate: 0.35, note: "매장 판매·소매업 기준 예시값입니다." },
+  RESTAURANT_CAFE: { label: "음식점/카페", rate: 0.70, note: "외식업에서 비교적 자주 참고하는 예시값입니다." },
+  MANUFACTURING: { label: "제조/생산", rate: 1.00, note: "제조·생산 현장 예시값입니다." },
+};
+
 export function StaffManager({
   initialStaff,
   role,
@@ -127,6 +143,9 @@ export function StaffManager({
   const [selectedStaffId, setSelectedStaffId] = useState(initialStaff[0]?.id ?? "");
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
   const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
+  const [employmentInsuranceScale, setEmploymentInsuranceScale] = useState<EmploymentInsuranceScale>("UNDER_150");
+  const [industrialAccidentPreset, setIndustrialAccidentPreset] = useState<IndustrialAccidentPreset>(() => inferIndustrialAccidentPreset(storeInfo.businessType));
+  const [customIndustrialAccidentRate, setCustomIndustrialAccidentRate] = useState(0.7);
   const [form, setForm] = useState<StaffForm>({
     name: "",
     color: "#10b981",
@@ -154,6 +173,10 @@ export function StaffManager({
     industrialAccidentEmployerRate: 0,
   });
   const [draft, setDraft] = useState<ContractDraft>(() => createDraft(initialStaff[0] ?? null, storeInfo));
+  const normalizedForm = useMemo(
+    () => normalizeStaffForm(form, employmentInsuranceScale, industrialAccidentPreset, customIndustrialAccidentRate),
+    [customIndustrialAccidentRate, employmentInsuranceScale, form, industrialAccidentPreset],
+  );
 
   useEffect(() => {
     if (staff.length > 0 && !staff.some((item) => item.id === selectedStaffId)) {
@@ -236,10 +259,7 @@ export function StaffManager({
   async function submit() {
     setError("");
     setNotice("");
-    const nextForm = {
-      ...form,
-      insuranceRate: getEmployerInsuranceRate(form),
-    };
+    const nextForm = normalizedForm;
     startTransition(async () => {
       try {
         const response = await fetch("/api/staff", {
@@ -260,6 +280,7 @@ export function StaffManager({
         setForm((prev) => ({
           ...prev,
           name: "",
+          targetWage: prev.employmentType === "HOURLY" ? prev.targetWage : 12000,
           monthlySalary: 0,
           performanceBonus: 0,
           mealAllowance: 0,
@@ -380,41 +401,49 @@ export function StaffManager({
                 </div>
               </div>
               <div style={formGrid}>
-                {renderBasicFields(form, setForm)}
+                {renderBasicFields(form, normalizedForm, setForm)}
               </div>
               {form.insuranceType === "FREELANCER" ? (
                 <div style={subtleBox}>
-                  <FieldLabel title="프리랜서 원천징수율" description="보통 3.3%를 입력합니다. 사업소득 원천징수 기준으로 직원 부담 개념입니다.">
-                    <NumberInput value={form.freelancerTaxRate} onChange={(value) => setForm({ ...form, freelancerTaxRate: value })} placeholder="예: 3.3" />
+                  <FieldLabel title="프리랜서 원천징수율(자동 적용)" description="프리랜서는 기본적으로 3.3% 원천징수 기준으로 저장합니다.">
+                    <StaticValue value={`${normalizedForm.freelancerTaxRate.toFixed(1)}%`} helper="원하면 다음 단계에서 별도 옵션으로 커스터마이즈할 수 있게 확장할 수 있습니다." />
                   </FieldLabel>
                 </div>
               ) : null}
               {form.insuranceType === "FOUR_INSURANCE" ? (
                 <div style={stack}>
                   <div style={subtleBox}>
-                    <strong style={{ display: "block", marginBottom: 10 }}>4대보험 세부 비율</strong>
+                    <strong style={{ display: "block", marginBottom: 10 }}>4대보험 자동 계산</strong>
                     <div style={insuranceGrid}>
-                      {renderInsuranceFields(form, setForm)}
+                      {renderInsuranceFields(
+                        normalizedForm,
+                        employmentInsuranceScale,
+                        setEmploymentInsuranceScale,
+                        industrialAccidentPreset,
+                        setIndustrialAccidentPreset,
+                        customIndustrialAccidentRate,
+                        setCustomIndustrialAccidentRate,
+                      )}
                     </div>
                   </div>
                   <div style={subtleBox}>
                     <div style={summaryRow}>
                       <span>근로자 공제 합계</span>
-                      <strong>{getEmployeeInsuranceRate(form).toFixed(2)}%</strong>
+                      <strong>{getEmployeeInsuranceRate(normalizedForm).toFixed(2)}%</strong>
                     </div>
                     <div style={summaryRow}>
                       <span>회사 부담 합계</span>
-                      <strong>{getEmployerInsuranceRate(form).toFixed(2)}%</strong>
+                      <strong>{getEmployerInsuranceRate(normalizedForm).toFixed(2)}%</strong>
                     </div>
                   </div>
                 </div>
               ) : null}
               <div style={subtleBox}>
-                <div style={summaryRow}><span>주휴수당(시간당 환산)</span><strong>{getCalculatedHolidayWage(form.baseWage).toLocaleString()}원</strong></div>
-                <div style={summaryRow}><span>최종시급 보정분</span><strong>{getCalculatedBonusWage(form.baseWage, form.targetWage).toLocaleString()}원</strong></div>
-                <div style={summaryRow}><span>설정된 보험/세금 방식</span><strong>{getInsuranceLabel(form.insuranceType)}</strong></div>
-                <div style={summaryRow}><span>월급 환산 시급</span><strong>{getFormSalaryHourly(form).toLocaleString()}원</strong></div>
-                <div style={summaryRow}><span>회사 기준 예상 실질 시급</span><strong>{getFormRealHourly(form).toLocaleString()}원</strong></div>
+                <div style={summaryRow}><span>주휴수당(시간당 환산)</span><strong>{getCalculatedHolidayWage(normalizedForm.baseWage).toLocaleString()}원</strong></div>
+                <div style={summaryRow}><span>최종시급 보정분</span><strong>{getCalculatedBonusWage(normalizedForm.baseWage, normalizedForm.targetWage).toLocaleString()}원</strong></div>
+                <div style={summaryRow}><span>설정된 보험/세금 방식</span><strong>{getInsuranceLabel(normalizedForm.insuranceType)}</strong></div>
+                <div style={summaryRow}><span>월급 환산 시급</span><strong>{getFormSalaryHourly(normalizedForm).toLocaleString()}원</strong></div>
+                <div style={summaryRow}><span>회사 기준 예상 실질 시급</span><strong>{getFormRealHourly(normalizedForm).toLocaleString()}원</strong></div>
               </div>
               {error ? <div style={errorText}>{error}</div> : null}
               {notice ? <div style={noticeText}>{notice}</div> : null}
@@ -539,7 +568,7 @@ export function StaffManager({
   );
 }
 
-function renderBasicFields(form: StaffForm, setForm: (value: StaffForm) => void) {
+function renderBasicFields(form: StaffForm, normalizedForm: StaffForm, setForm: (value: StaffForm) => void) {
   return (
     <>
       <FieldLabel title="직원 이름" description="계약서와 스케줄에 표시될 이름입니다.">
@@ -548,17 +577,42 @@ function renderBasicFields(form: StaffForm, setForm: (value: StaffForm) => void)
       <FieldLabel title="표시 색상" description="스케줄 표에서 이 직원을 구분하는 색입니다.">
         <TextInput value={form.color} onChange={(value) => setForm({ ...form, color: value })} placeholder="#10b981" />
       </FieldLabel>
+      <FieldLabel title="급여 방식" description="시급제면 시급을 직접 넣고, 월급제면 월급 총액으로 자동 환산합니다.">
+        <select value={form.employmentType} onChange={(event) => setForm({ ...form, employmentType: event.target.value as "HOURLY" | "MONTHLY" })} style={input}>
+          <option value="HOURLY">시급제</option>
+          <option value="MONTHLY">월급제</option>
+        </select>
+      </FieldLabel>
       <FieldLabel title="최저시급 또는 기본시급" description="법정 최저시급 또는 실제 기본시급을 입력합니다.">
         <NumberInput value={form.baseWage} onChange={(value) => setForm({ ...form, baseWage: value })} placeholder="예: 10030" />
       </FieldLabel>
+      <FieldLabel title="예상 월 근로시간" description="월급 환산과 월 총고용비 계산의 기준 시간입니다.">
+        <NumberInput value={form.expectedMonthlyHours} onChange={(value) => setForm({ ...form, expectedMonthlyHours: value })} placeholder="예: 160" />
+      </FieldLabel>
+      {form.employmentType === "HOURLY" ? (
+        <>
+          <FieldLabel title="최종시급" description="주휴수당, 상여를 포함해 실제로 맞추고 싶은 최종 시급입니다.">
+            <NumberInput value={form.targetWage} onChange={(value) => setForm({ ...form, targetWage: value })} placeholder="예: 12000" />
+          </FieldLabel>
+          <FieldLabel title="예상 월급(자동 계산)" description="시급제 기준으로 최종시급 x 예상 월 근로시간을 계산한 값입니다.">
+            <StaticValue value={`${Math.round(normalizedForm.targetWage * normalizedForm.expectedMonthlyHours).toLocaleString()}원`} helper="월급제와 충돌하지 않도록 시급제일 때만 자동 계산으로 보여줍니다." />
+          </FieldLabel>
+        </>
+      ) : (
+        <>
+          <FieldLabel title="월급 총액" description="월급제로 지급하는 총 세전 금액입니다.">
+            <NumberInput value={form.monthlySalary} onChange={(value) => setForm({ ...form, monthlySalary: value })} placeholder="예: 2500000" />
+          </FieldLabel>
+          <FieldLabel title="월급 환산 시급(자동 계산)" description="월급 총액을 예상 월 근로시간으로 나눈 환산 시급입니다.">
+            <StaticValue value={`${normalizedForm.targetWage.toLocaleString()}원`} helper="월급제에서는 최종시급이 이 값으로 자동 맞춰집니다." />
+          </FieldLabel>
+        </>
+      )}
       <FieldLabel title="주휴수당(자동 계산)" description="기본시급의 20%를 시간당 주휴수당 환산값으로 보여줍니다.">
         <StaticValue value={`${getCalculatedHolidayWage(form.baseWage).toLocaleString()}원`} helper="기본시급을 바꾸면 자동으로 같이 바뀝니다." />
       </FieldLabel>
-      <FieldLabel title="최종시급" description="주휴수당, 상여를 포함해 실제로 맞추고 싶은 최종 시급입니다.">
-        <NumberInput value={form.targetWage} onChange={(value) => setForm({ ...form, targetWage: value })} placeholder="예: 12000" />
-      </FieldLabel>
       <FieldLabel title="상여/보정분(자동 계산)" description="최종시급이 기본시급 + 주휴수당보다 높으면 차액을 자동 계산합니다.">
-        <StaticValue value={`${getCalculatedBonusWage(form.baseWage, form.targetWage).toLocaleString()}원`} helper="직원 보상 구조의 상여 항목과 연결됩니다." />
+        <StaticValue value={`${getCalculatedBonusWage(normalizedForm.baseWage, normalizedForm.targetWage).toLocaleString()}원`} helper="직원 보상 구조의 상여 항목과 연결됩니다." />
       </FieldLabel>
       <FieldLabel title="시간당 기대매출" description="이 직원이 근무할 때 기대하는 시간당 매출 기여값입니다.">
         <NumberInput value={form.expectedSales} onChange={(value) => setForm({ ...form, expectedSales: value })} placeholder="예: 100000" />
@@ -575,18 +629,6 @@ function renderBasicFields(form: StaffForm, setForm: (value: StaffForm) => void)
       <FieldLabel title="기타수당" description="유니폼, 야간수당 등 별도 지급하는 금액입니다.">
         <NumberInput value={form.otherAllowance} onChange={(value) => setForm({ ...form, otherAllowance: value })} placeholder="예: 30000" />
       </FieldLabel>
-      <FieldLabel title="급여 방식" description="시급제인지 월급제인지 선택합니다.">
-        <select value={form.employmentType} onChange={(event) => setForm({ ...form, employmentType: event.target.value as "HOURLY" | "MONTHLY" })} style={input}>
-          <option value="HOURLY">시급제</option>
-          <option value="MONTHLY">월급제</option>
-        </select>
-      </FieldLabel>
-      <FieldLabel title="월급 총액" description="월급제로 지급하면 총 지급액을 입력합니다. 시급제면 0으로 둬도 됩니다.">
-        <NumberInput value={form.monthlySalary} onChange={(value) => setForm({ ...form, monthlySalary: value })} placeholder="예: 2500000" />
-      </FieldLabel>
-      <FieldLabel title="예상 월 근로시간" description="월급을 시급으로 환산할 때 기준이 되는 월 근로시간입니다.">
-        <NumberInput value={form.expectedMonthlyHours} onChange={(value) => setForm({ ...form, expectedMonthlyHours: value })} placeholder="예: 160" />
-      </FieldLabel>
       <FieldLabel title="보험/세금 방식" description="프리랜서인지, 4대보험인지, 해당 없음인지 선택합니다.">
         <select value={form.insuranceType} onChange={(event) => setForm({ ...form, insuranceType: event.target.value as StaffForm["insuranceType"] })} style={input}>
           <option value="NONE">보험 없음</option>
@@ -598,35 +640,70 @@ function renderBasicFields(form: StaffForm, setForm: (value: StaffForm) => void)
   );
 }
 
-function renderInsuranceFields(form: StaffForm, setForm: (value: StaffForm) => void) {
+function renderInsuranceFields(
+  form: StaffForm,
+  employmentInsuranceScale: EmploymentInsuranceScale,
+  setEmploymentInsuranceScale: (value: EmploymentInsuranceScale) => void,
+  industrialAccidentPreset: IndustrialAccidentPreset,
+  setIndustrialAccidentPreset: (value: IndustrialAccidentPreset) => void,
+  customIndustrialAccidentRate: number,
+  setCustomIndustrialAccidentRate: (value: number) => void,
+) {
   return (
     <>
-      <FieldLabel title="국민연금 근로자 부담률" description="급여에서 근로자가 부담하는 국민연금 비율입니다.">
-        <NumberInput value={form.nationalPensionEmployeeRate} onChange={(value) => setForm({ ...form, nationalPensionEmployeeRate: value })} placeholder="예: 4.75" />
+      <FieldLabel title="사업장 규모" description="고용보험 회사 부담률 자동 계산에 사용됩니다.">
+        <select value={employmentInsuranceScale} onChange={(event) => setEmploymentInsuranceScale(event.target.value as EmploymentInsuranceScale)} style={input}>
+          {Object.entries(EMPLOYMENT_INSURANCE_RATE_MAP).map(([key, item]) => (
+            <option key={key} value={key}>
+              {item.label}
+            </option>
+          ))}
+        </select>
       </FieldLabel>
-      <FieldLabel title="국민연금 회사 부담률" description="사업주가 부담하는 국민연금 비율입니다.">
-        <NumberInput value={form.nationalPensionEmployerRate} onChange={(value) => setForm({ ...form, nationalPensionEmployerRate: value })} placeholder="예: 4.75" />
+      <FieldLabel title="산재보험 업종군" description="업종군에 따라 산재보험 회사 부담률을 자동으로 반영합니다.">
+        <select value={industrialAccidentPreset} onChange={(event) => setIndustrialAccidentPreset(event.target.value as IndustrialAccidentPreset)} style={input}>
+          <option value="GENERAL_SERVICE">일반 사무/서비스</option>
+          <option value="RETAIL">소매/판매</option>
+          <option value="RESTAURANT_CAFE">음식점/카페</option>
+          <option value="MANUFACTURING">제조/생산</option>
+          <option value="CUSTOM">직접 입력</option>
+        </select>
       </FieldLabel>
-      <FieldLabel title="건강보험 근로자 부담률" description="급여에서 공제되는 건강보험 비율입니다.">
-        <NumberInput value={form.healthInsuranceEmployeeRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployeeRate: value })} placeholder="예: 3.595" />
+      {industrialAccidentPreset === "CUSTOM" ? (
+        <FieldLabel title="산재보험 직접 입력" description="사업장 고지서 기준 회사 부담 산재보험 요율을 직접 넣습니다.">
+          <NumberInput value={customIndustrialAccidentRate} onChange={setCustomIndustrialAccidentRate} placeholder="예: 0.7" />
+        </FieldLabel>
+      ) : (
+        <FieldLabel title="산재보험 자동 반영" description={INDUSTRIAL_ACCIDENT_RATE_MAP[industrialAccidentPreset].note}>
+          <StaticValue value={`${form.industrialAccidentEmployerRate.toFixed(3)}%`} helper="산재보험은 근로자 부담 없이 회사만 부담합니다." />
+        </FieldLabel>
+      )}
+      <FieldLabel title="국민연금 근로자 부담률" description="기준소득월액 기준으로 자동 반영됩니다.">
+        <StaticValue value={`${form.nationalPensionEmployeeRate.toFixed(2)}%`} helper="직원 부담과 회사 부담이 동일합니다." />
       </FieldLabel>
-      <FieldLabel title="건강보험 회사 부담률" description="사업주가 부담하는 건강보험 비율입니다.">
-        <NumberInput value={form.healthInsuranceEmployerRate} onChange={(value) => setForm({ ...form, healthInsuranceEmployerRate: value })} placeholder="예: 3.595" />
+      <FieldLabel title="국민연금 회사 부담률" description="기준소득월액 기준으로 자동 반영됩니다.">
+        <StaticValue value={`${form.nationalPensionEmployerRate.toFixed(2)}%`} helper="국민연금 기준소득월액 상하한의 영향을 받습니다." />
       </FieldLabel>
-      <FieldLabel title="장기요양 근로자 부담률" description="건강보험과 별도로 공제되는 장기요양보험 비율입니다.">
-        <NumberInput value={form.longTermCareEmployeeRate} onChange={(value) => setForm({ ...form, longTermCareEmployeeRate: value })} placeholder="예: 0.472" />
+      <FieldLabel title="건강보험 근로자 부담률" description="직장가입자 보수월액 기준으로 자동 반영됩니다.">
+        <StaticValue value={`${form.healthInsuranceEmployeeRate.toFixed(3)}%`} helper="보수 정산 시 실제 공제액은 일부 달라질 수 있습니다." />
       </FieldLabel>
-      <FieldLabel title="장기요양 회사 부담률" description="사업주가 부담하는 장기요양보험 비율입니다.">
-        <NumberInput value={form.longTermCareEmployerRate} onChange={(value) => setForm({ ...form, longTermCareEmployerRate: value })} placeholder="예: 0.472" />
+      <FieldLabel title="건강보험 회사 부담률" description="직장가입자 보수월액 기준으로 자동 반영됩니다.">
+        <StaticValue value={`${form.healthInsuranceEmployerRate.toFixed(3)}%`} helper="직원 부담과 회사 부담이 동일합니다." />
       </FieldLabel>
-      <FieldLabel title="고용보험 근로자 부담률" description="급여에서 공제되는 고용보험 비율입니다.">
-        <NumberInput value={form.employmentInsuranceEmployeeRate} onChange={(value) => setForm({ ...form, employmentInsuranceEmployeeRate: value })} placeholder="예: 0.9" />
+      <FieldLabel title="장기요양 근로자 부담률" description="건강보험료의 13.14%를 임금 환산값으로 자동 반영합니다.">
+        <StaticValue value={`${form.longTermCareEmployeeRate.toFixed(3)}%`} helper="건강보험료에 연동되어 함께 움직이는 항목입니다." />
       </FieldLabel>
-      <FieldLabel title="고용보험 회사 부담률" description="실업급여 0.9%와 사업장 규모별 추가분을 합친 총 회사 부담률을 넣습니다.">
-        <NumberInput value={form.employmentInsuranceEmployerRate} onChange={(value) => setForm({ ...form, employmentInsuranceEmployerRate: value })} placeholder="예: 1.15" />
+      <FieldLabel title="장기요양 회사 부담률" description="건강보험료의 13.14%를 임금 환산값으로 자동 반영합니다.">
+        <StaticValue value={`${form.longTermCareEmployerRate.toFixed(3)}%`} helper="직원 부담과 회사 부담이 동일합니다." />
       </FieldLabel>
-      <FieldLabel title="산재보험 회사 부담률" description="근로자 부담은 없고 회사만 부담합니다. 업종별 요율을 입력합니다.">
-        <NumberInput value={form.industrialAccidentEmployerRate} onChange={(value) => setForm({ ...form, industrialAccidentEmployerRate: value })} placeholder="예: 0.7" />
+      <FieldLabel title="고용보험 근로자 부담률" description="실업급여 기준 0.9%로 자동 반영됩니다.">
+        <StaticValue value={`${form.employmentInsuranceEmployeeRate.toFixed(2)}%`} helper="근로자 부담은 회사 규모와 관계없이 동일합니다." />
+      </FieldLabel>
+      <FieldLabel title="고용보험 회사 부담률" description={EMPLOYMENT_INSURANCE_RATE_MAP[employmentInsuranceScale].note}>
+        <StaticValue value={`${form.employmentInsuranceEmployerRate.toFixed(2)}%`} helper={`${EMPLOYMENT_INSURANCE_RATE_MAP[employmentInsuranceScale].label} 기준 자동 계산`} />
+      </FieldLabel>
+      <FieldLabel title="산재보험 회사 부담률" description="근로자 부담 없이 회사만 부담합니다.">
+        <StaticValue value={`${form.industrialAccidentEmployerRate.toFixed(3)}%`} helper={industrialAccidentPreset === "CUSTOM" ? "직접 입력한 업종 요율입니다." : INDUSTRIAL_ACCIDENT_RATE_MAP[industrialAccidentPreset].note} />
       </FieldLabel>
     </>
   );
@@ -653,6 +730,92 @@ function getDisplayedFinalHourly(member: Pick<StaffMember, "employmentType" | "m
   return member.targetWage;
 }
 
+function inferIndustrialAccidentPreset(businessType: string) {
+  const source = businessType.toLowerCase();
+  if (source.includes("카페") || source.includes("식당") || source.includes("외식") || source.includes("음식")) return "RESTAURANT_CAFE" as const;
+  if (source.includes("소매") || source.includes("도소매") || source.includes("판매") || source.includes("편의점")) return "RETAIL" as const;
+  if (source.includes("제조") || source.includes("생산") || source.includes("공장")) return "MANUFACTURING" as const;
+  return "GENERAL_SERVICE" as const;
+}
+
+function getIndustrialAccidentRate(preset: IndustrialAccidentPreset, customRate: number) {
+  if (preset === "CUSTOM") return Number(customRate) || 0;
+  return INDUSTRIAL_ACCIDENT_RATE_MAP[preset].rate;
+}
+
+function normalizeStaffForm(
+  form: StaffForm,
+  employmentInsuranceScale: EmploymentInsuranceScale,
+  industrialAccidentPreset: IndustrialAccidentPreset,
+  customIndustrialAccidentRate: number,
+): StaffForm {
+  const expectedMonthlyHours = Math.max(1, Number(form.expectedMonthlyHours) || 160);
+  const targetWage =
+    form.employmentType === "MONTHLY" && Number(form.monthlySalary) > 0
+      ? Math.round(Number(form.monthlySalary) / expectedMonthlyHours)
+      : Number(form.targetWage) || 0;
+
+  if (form.insuranceType === "FOUR_INSURANCE") {
+    const employmentInsuranceEmployerRate = EMPLOYMENT_INSURANCE_RATE_MAP[employmentInsuranceScale].employerRate;
+    const industrialAccidentEmployerRate = getIndustrialAccidentRate(industrialAccidentPreset, customIndustrialAccidentRate);
+    return {
+      ...form,
+      targetWage,
+      monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
+      expectedMonthlyHours,
+      freelancerTaxRate: 3.3,
+      nationalPensionEmployeeRate: 4.75,
+      nationalPensionEmployerRate: 4.75,
+      healthInsuranceEmployeeRate: 3.595,
+      healthInsuranceEmployerRate: 3.595,
+      longTermCareEmployeeRate: 0.472,
+      longTermCareEmployerRate: 0.472,
+      employmentInsuranceEmployeeRate: 0.9,
+      employmentInsuranceEmployerRate,
+      industrialAccidentEmployerRate,
+      insuranceRate: Number((4.75 + 3.595 + 0.472 + employmentInsuranceEmployerRate + industrialAccidentEmployerRate).toFixed(3)),
+    };
+  }
+
+  if (form.insuranceType === "FREELANCER") {
+    return {
+      ...form,
+      targetWage,
+      monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
+      expectedMonthlyHours,
+      freelancerTaxRate: 3.3,
+      nationalPensionEmployeeRate: 0,
+      nationalPensionEmployerRate: 0,
+      healthInsuranceEmployeeRate: 0,
+      healthInsuranceEmployerRate: 0,
+      longTermCareEmployeeRate: 0,
+      longTermCareEmployerRate: 0,
+      employmentInsuranceEmployeeRate: 0,
+      employmentInsuranceEmployerRate: 0,
+      industrialAccidentEmployerRate: 0,
+      insuranceRate: 0,
+    };
+  }
+
+  return {
+    ...form,
+    targetWage,
+    monthlySalary: form.employmentType === "MONTHLY" ? Number(form.monthlySalary) || 0 : 0,
+    expectedMonthlyHours,
+    freelancerTaxRate: 3.3,
+    nationalPensionEmployeeRate: 0,
+    nationalPensionEmployerRate: 0,
+    healthInsuranceEmployeeRate: 0,
+    healthInsuranceEmployerRate: 0,
+    longTermCareEmployeeRate: 0,
+    longTermCareEmployerRate: 0,
+    employmentInsuranceEmployeeRate: 0,
+    employmentInsuranceEmployerRate: 0,
+    industrialAccidentEmployerRate: 0,
+    insuranceRate: 0,
+  };
+}
+
 function getEmployeeInsuranceRate(member: Pick<StaffMember, "insuranceType" | "freelancerTaxRate" | "nationalPensionEmployeeRate" | "healthInsuranceEmployeeRate" | "longTermCareEmployeeRate" | "employmentInsuranceEmployeeRate">) {
   if (member.insuranceType === "FREELANCER") return Number(member.freelancerTaxRate) || 0;
   if (member.insuranceType !== "FOUR_INSURANCE") return 0;
@@ -677,15 +840,6 @@ function applySuggestedInsuranceRates(form: StaffForm): StaffForm {
   return {
     ...form,
     insuranceType: "FOUR_INSURANCE",
-    nationalPensionEmployeeRate: 4.75,
-    nationalPensionEmployerRate: 4.75,
-    healthInsuranceEmployeeRate: 3.595,
-    healthInsuranceEmployerRate: 3.595,
-    longTermCareEmployeeRate: 0.472,
-    longTermCareEmployerRate: 0.472,
-    employmentInsuranceEmployeeRate: 0.9,
-    employmentInsuranceEmployerRate: 1.15,
-    industrialAccidentEmployerRate: 0,
   };
 }
 
