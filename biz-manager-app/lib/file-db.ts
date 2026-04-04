@@ -3,7 +3,10 @@ import path from "path";
 import { randomUUID } from "crypto";
 import type { SystemRole } from "@/types/domain";
 
-const dataFile = path.join(process.cwd(), "data", "app-data.json");
+const bundledDataFile = path.join(process.cwd(), "data", "app-data.json");
+const dataFile = process.env.VERCEL
+  ? path.join("/tmp", "biz-manager-app", "app-data.json")
+  : bundledDataFile;
 
 export type AppUser = {
   id: string;
@@ -117,7 +120,14 @@ async function ensureDataFile() {
   try {
     await fs.access(dataFile);
   } catch {
-    await fs.writeFile(dataFile, JSON.stringify(emptyData, null, 2), "utf8");
+    let initialData = emptyData;
+    if (dataFile !== bundledDataFile) {
+      try {
+        const bundled = await fs.readFile(bundledDataFile, "utf8");
+        initialData = normalizeAppData(JSON.parse(bundled) as Partial<AppData>);
+      } catch {}
+    }
+    await fs.writeFile(dataFile, JSON.stringify(initialData, null, 2), "utf8");
   }
 }
 
