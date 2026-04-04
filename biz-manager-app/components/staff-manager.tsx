@@ -651,6 +651,18 @@ export function StaffManager({
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <div style={miniBadge}>현재 {scheduleTimeUnit}분 단위</div>
+                  <div style={timeUnitChipRow}>
+                    {[20, 30, 60].map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setScheduleTimeUnit(unit as 20 | 30 | 60)}
+                        style={scheduleTimeUnit === unit ? timeUnitChipActive : timeUnitChip}
+                      >
+                        {unit}분
+                      </button>
+                    ))}
+                  </div>
                   <button type="button" onClick={() => setShowEarlyTemplateSlots((prev) => !prev)} style={secondaryButton}>
                     {showEarlyTemplateSlots ? "새벽 접기" : "새벽 펼치기"}
                   </button>
@@ -664,7 +676,7 @@ export function StaffManager({
                   <div style={subtleBox}>
                     <div style={summaryRow}><span>{selectedStaff.name} 실제 월 근무시간</span><strong>{actualMonthHours.toFixed(1)}h</strong></div>
                     <div style={summaryRow}><span>결근 반영 일수</span><strong>{Object.keys(calendarLogs).length}일 근무</strong></div>
-                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>스케줄 관리 탭에서 결근을 입력하면 이 달력과 월 근무시간도 같이 줄어듭니다.</div>
+                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>여기서 시간 단위를 바꾸고 저장하면 스케줄 관리 탭도 같은 분 단위로 맞춰집니다. 스케줄 관리 탭에서 결근을 입력하면 이 달력과 월 근무시간도 같이 줄어듭니다.</div>
                   </div>
                   <div style={templateTableWrap}>
                     <table style={templateTable}>
@@ -1378,6 +1390,9 @@ const templateSlotActive = { background: "rgba(16, 185, 129, 0.12)" } as const;
 const templateSlotBadge = { display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#10b981", color: "#052e16", fontSize: 11, fontWeight: 700 } as const;
 const templateCollapsedRow = { padding: 12, textAlign: "center", color: "#94a3b8", background: "#0b1220", borderBottom: "1px solid #1e293b" } as const;
 const miniBadge = { padding: "8px 12px", borderRadius: 999, background: "#081121", border: "1px solid #22304a", color: "#a7f3d0", fontSize: 12, fontWeight: 700 } as const;
+const timeUnitChipRow = { display: "flex", gap: 6, flexWrap: "wrap" } as const;
+const timeUnitChip = { padding: "8px 12px", borderRadius: 999, background: "#020617", border: "1px solid #334155", color: "#cbd5e1", fontSize: 12, fontWeight: 700, cursor: "pointer" } as const;
+const timeUnitChipActive = { ...timeUnitChip, background: "rgba(16, 185, 129, 0.16)", border: "1px solid #10b981", color: "#d1fae5" } as const;
 const dayHead = { textAlign: "center", fontSize: 12, color: "#64748b", paddingBottom: 6 } as const;
 const calendarCell = { minHeight: 84, padding: 10, borderRadius: 14, border: "1px solid #1e293b", background: "#020617", display: "flex", flexDirection: "column", justifyContent: "space-between" } as const;
 const contractLayout = { display: "grid", gap: 16, gridTemplateColumns: "minmax(320px, 460px) 1fr" } as const;
