@@ -321,6 +321,13 @@ export function StaffManager({
     () => (selectedStaff ? getStaffSummary(selectedStaff, actualMonthHours || selectedStaff.expectedMonthlyHours) : null),
     [actualMonthHours, selectedStaff],
   );
+  const draftPreview = useMemo(() => {
+    const previewStaff = buildPreviewStaff(normalizedForm);
+    return {
+      staff: previewStaff,
+      summary: getStaffSummary(previewStaff, previewStaff.expectedMonthlyHours),
+    };
+  }, [normalizedForm]);
 
   const averageFinalHourly = useMemo(() => {
     if (!staff.length) return 0;
@@ -596,6 +603,45 @@ export function StaffManager({
             </div>
           </section>
           <div style={rightColumn}>
+            <section style={panelBox}>
+              <div style={splitHeader}>
+                <div>
+                  <h2 style={sectionTitle}>입력 중 미리보기</h2>
+                  <p style={helpText}>직원 등록 칸에 넣은 값이 여기 보상 구조 카드에 바로 반영됩니다.</p>
+                </div>
+                <div style={{ ...chip, border: "1px solid #10b981" }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 999, background: draftPreview.staff.color, display: "inline-block" }} />
+                  {draftPreview.staff.name}
+                </div>
+              </div>
+              <div style={cardGrid}>
+                <Info label="최저시급" value={`${draftPreview.staff.baseWage.toLocaleString()}원`} />
+                <Info label="주휴수당" value={`${draftPreview.staff.holidayWage.toLocaleString()}원`} />
+                <Info label="상여" value={`${draftPreview.staff.bonusWage.toLocaleString()}원`} />
+                {draftPreview.staff.employmentType === "MONTHLY" ? (
+                  <Info label="월급 총액" value={`${draftPreview.staff.monthlySalary.toLocaleString()}원`} helper={`주 ${draftPreview.staff.weeklyWorkingHours.toLocaleString()}h / ${draftPreview.staff.weeklyWorkingDays}일`} />
+                ) : (
+                  <Info label="최종시급" value={`${draftPreview.staff.targetWage.toLocaleString()}원`} />
+                )}
+                <Info label="추가수당" value={`${draftPreview.summary.extraAllowance.toLocaleString()}원`} helper={`식비 ${draftPreview.staff.mealAllowance.toLocaleString()} / 교통비 ${draftPreview.staff.transportAllowance.toLocaleString()} / 기타 ${draftPreview.staff.otherAllowance.toLocaleString()}`} />
+                <Info label="성과급" value={`${draftPreview.staff.performanceBonus.toLocaleString()}원`} />
+                <Info label="보험 방식" value={getInsuranceLabel(draftPreview.staff.insuranceType)} helper={`회사 부담 합계 ${getEmployerInsuranceRate(draftPreview.staff).toFixed(2)}%`} />
+                <Info label="근로자 공제 합계" value={`${getEmployeeInsuranceRate(draftPreview.staff).toFixed(2)}%`} />
+                {draftPreview.staff.employmentType === "MONTHLY" ? (
+                  <Info label="적정 월급(최저시급+주휴)" value={`${draftPreview.summary.salaryGuide.recommendedMonthlySalary.toLocaleString()}원`} helper={draftPreview.summary.salaryGuide.formula} />
+                ) : (
+                  <Info label="월급 환산 시급" value={`${draftPreview.summary.salaryHourly.toLocaleString()}원`} />
+                )}
+                {draftPreview.staff.employmentType === "MONTHLY" ? (
+                  <Info label="입력 월급과 차이" value={`${draftPreview.summary.monthlySalaryGap.toLocaleString()}원`} helper={`휴게 공제 ${draftPreview.summary.salaryGuide.weeklyBreakHours.toFixed(1)}h / 주휴 ${draftPreview.summary.salaryGuide.weeklyHolidayHours.toFixed(1)}h`} />
+                ) : (
+                  <Info label="실질 시급" value={`${draftPreview.summary.realHourly.toLocaleString()}원`} helper="회사 부담 비용 포함" />
+                )}
+                <Info label="월 총고용비" value={`${draftPreview.summary.employerMonthlyCost.toLocaleString()}원`} />
+                <Info label="예상 월 기대매출" value={`${draftPreview.summary.monthlyExpectedSales.toLocaleString()}원`} />
+              </div>
+            </section>
+
             <section style={panelBox}>
               <h2 style={sectionTitle}>직원 보상 구조</h2>
               <div style={chipRow}>
@@ -1164,6 +1210,44 @@ function getStaffSummary(member: StaffMember, hours: number) {
   const salaryGuide = getMonthlySalaryGuide(member);
   const monthlySalaryGap = member.monthlySalary - salaryGuide.recommendedMonthlySalary;
   return { extraAllowance, salaryHourly, realHourly, employerMonthlyCost, monthlyExpectedSales, workingHours, salaryGuide, monthlySalaryGap };
+}
+
+function buildPreviewStaff(form: StaffForm): StaffMember {
+  const holidayWage = getCalculatedHolidayWage(form.baseWage);
+  const bonusWage = getCalculatedBonusWage(form.baseWage, form.targetWage);
+  return {
+    id: "draft-preview",
+    name: form.name.trim() || "저장 전 미리보기",
+    color: form.color || "#10b981",
+    baseWage: form.baseWage,
+    targetWage: form.targetWage,
+    holidayWage,
+    bonusWage,
+    capacity: form.expectedSales,
+    incentive: form.performanceBonus,
+    expectedSales: form.expectedSales,
+    performanceBonus: form.performanceBonus,
+    mealAllowance: form.mealAllowance,
+    transportAllowance: form.transportAllowance,
+    otherAllowance: form.otherAllowance,
+    employmentType: form.employmentType,
+    monthlySalary: form.monthlySalary,
+    expectedMonthlyHours: form.expectedMonthlyHours,
+    weeklyWorkingHours: form.weeklyWorkingHours,
+    weeklyWorkingDays: form.weeklyWorkingDays,
+    insuranceType: form.insuranceType,
+    insuranceRate: form.insuranceRate,
+    freelancerTaxRate: form.freelancerTaxRate,
+    nationalPensionEmployeeRate: form.nationalPensionEmployeeRate,
+    nationalPensionEmployerRate: form.nationalPensionEmployerRate,
+    healthInsuranceEmployeeRate: form.healthInsuranceEmployeeRate,
+    healthInsuranceEmployerRate: form.healthInsuranceEmployerRate,
+    longTermCareEmployeeRate: form.longTermCareEmployeeRate,
+    longTermCareEmployerRate: form.longTermCareEmployerRate,
+    employmentInsuranceEmployeeRate: form.employmentInsuranceEmployeeRate,
+    employmentInsuranceEmployerRate: form.employmentInsuranceEmployerRate,
+    industrialAccidentEmployerRate: form.industrialAccidentEmployerRate,
+  };
 }
 
 function createDraft(member: StaffMember | null, storeInfo: StoreInfo): ContractDraft {

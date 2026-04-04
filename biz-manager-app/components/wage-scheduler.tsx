@@ -412,6 +412,27 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
   }, [currentMonthLogs, monthlySnapshots, staff, targetMonth, targetYear]);
 
   const selectedMonthlyStaff = monthlyStats.staffStats.find((member) => member.id === selectedStaffId) ?? monthlyStats.staffStats[0] ?? null;
+  const selectedStaffMonthlyPlan = useMemo(() => {
+    if (!selectedStaff) return null;
+    const targetHours = Math.max(0, Number(selectedStaff.expectedMonthlyHours) || 160);
+    const assignedHours = Number(selectedMonthlyStaff?.monthlyGross ?? 0);
+    const remainingHours = Math.max(0, targetHours - assignedHours);
+    const overtimeHours = Math.max(0, assignedHours - targetHours);
+    const weeklyWorkingDays = Math.max(1, Number(selectedStaff.weeklyWorkingDays) || 5);
+    const weeklyTargetHours = targetHours / 4.345;
+    const dailyTargetHours = weeklyTargetHours / weeklyWorkingDays;
+
+    return {
+      targetHours,
+      assignedHours,
+      remainingHours,
+      overtimeHours,
+      weeklyWorkingDays,
+      weeklyTargetHours,
+      dailyTargetHours,
+      progressPercent: targetHours > 0 ? Math.min((assignedHours / targetHours) * 100, 100) : 0,
+    };
+  }, [selectedMonthlyStaff, selectedStaff]);
   const monthlyProfit = totalRevenue - totalExpense - monthlyStats.totalLabor;
   const laborRatio = totalRevenue > 0 ? (monthlyStats.totalLabor / totalRevenue) * 100 : 0;
 
@@ -566,6 +587,27 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
                     </div>
                   </div>
                   <div className={styles.hintRow}><span>현재 선택: <strong>{selectedStaff?.name ?? "없음"}</strong></span><span>{showEarlyHours ? "00:00부터 전체 표시" : "09:00 이후만 표시 중"}</span></div>
+                  <div className={styles.hintRow}>
+                    {selectedStaffMonthlyPlan ? (
+                      <>
+                        <span>
+                          {targetYear}년 {targetMonth}월 목표 {selectedStaffMonthlyPlan.targetHours.toFixed(1)}h
+                        </span>
+                        <span>
+                          현재 배정 {selectedStaffMonthlyPlan.assignedHours.toFixed(1)}h
+                        </span>
+                        <span>
+                          {selectedStaffMonthlyPlan.overtimeHours > 0 ? (
+                            <strong style={{ color: "#f97316" }}>목표 초과 {selectedStaffMonthlyPlan.overtimeHours.toFixed(1)}h</strong>
+                          ) : (
+                            <strong style={{ color: "#34d399" }}>남은 시간 {selectedStaffMonthlyPlan.remainingHours.toFixed(1)}h</strong>
+                          )}
+                        </span>
+                      </>
+                    ) : (
+                      <span>직원을 선택하면 월 목표 근무시간 대비 남은 시간을 보여드립니다.</span>
+                    )}
+                  </div>
                   <div className={styles.tableWrap}>
                     <table className={styles.table}>
                       <thead><tr><th className={styles.timeCell}>시간</th>{SCHEDULE_DAYS.map((day) => <th key={day}>{day}</th>)}</tr></thead>
@@ -595,6 +637,57 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
               )}
             </section>
             <aside className={styles.controlPanel}>
+              <section className={styles.panel}>
+                <div className={styles.controlTitle}>월 목표 근무시간</div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <label style={{ display: "grid", gap: 6, color: "#94a3b8", fontSize: 13 }}>
+                      연도
+                      <select value={targetYear} onChange={(event) => setTargetYear(Number(event.target.value))} className={styles.select}>
+                        {Array.from({ length: 5 }, (_, index) => TODAY.getFullYear() - 1 + index).map((year) => <option key={year} value={year}>{year}년</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 6, color: "#94a3b8", fontSize: 13 }}>
+                      월
+                      <select value={targetMonth} onChange={(event) => setTargetMonth(Number(event.target.value))} className={styles.select}>
+                        {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month}월</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  {selectedStaffMonthlyPlan ? (
+                    <div className={styles.weeklyCard}>
+                      <div className={styles.weeklyNameRow}>
+                        <span>{selectedStaff?.name}</span>
+                        <span style={{ color: selectedStaffMonthlyPlan.overtimeHours > 0 ? "#f97316" : "#34d399" }}>
+                          {selectedStaffMonthlyPlan.overtimeHours > 0 ? `초과 ${selectedStaffMonthlyPlan.overtimeHours.toFixed(1)}h` : `남은 ${selectedStaffMonthlyPlan.remainingHours.toFixed(1)}h`}
+                        </span>
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: 13 }}>
+                        {targetYear}년 {targetMonth}월 목표 {selectedStaffMonthlyPlan.targetHours.toFixed(1)}h
+                      </div>
+                      <div style={{ color: "#e2e8f0", fontSize: 13 }}>
+                        현재 배정 {selectedStaffMonthlyPlan.assignedHours.toFixed(1)}h
+                        {selectedStaffMonthlyPlan.overtimeHours > 0 ? ` · 목표보다 ${selectedStaffMonthlyPlan.overtimeHours.toFixed(1)}h 많습니다.` : ` · 앞으로 ${selectedStaffMonthlyPlan.remainingHours.toFixed(1)}h 남았습니다.`}
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, overflow: "hidden", background: "#020617", border: "1px solid #1e293b" }}>
+                        <div
+                          style={{
+                            width: `${selectedStaffMonthlyPlan.progressPercent}%`,
+                            height: "100%",
+                            background: selectedStaffMonthlyPlan.overtimeHours > 0 ? "#f97316" : "linear-gradient(90deg, #059669 0%, #10b981 100%)",
+                          }}
+                        />
+                      </div>
+                      <div style={{ color: "#64748b", fontSize: 12 }}>
+                        주 목표 {selectedStaffMonthlyPlan.weeklyTargetHours.toFixed(1)}h · 주 {selectedStaffMonthlyPlan.weeklyWorkingDays}일 근무면 하루 {selectedStaffMonthlyPlan.dailyTargetHours.toFixed(1)}h 정도 배정하면 맞춰가기 좋습니다.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={styles.controlText}>직원을 선택하면 여기서 월 목표 근무시간과 남은 시간을 바로 볼 수 있습니다.</div>
+                  )}
+                  <div className={styles.controlText}>스케줄 표를 수정하면 이 카드가 즉시 다시 계산됩니다. 월 160시간으로 잡아둔 직원이면 몇 시간을 더 채워야 하는지 바로 확인할 수 있습니다.</div>
+                </div>
+              </section>
               <section className={styles.panel}><div className={styles.controlTitle}>현재 보기</div><p className={styles.controlText}>시간 단위를 바꾸면 표, 주간 근무시간, 월별 달력 로그가 함께 다시 계산됩니다.</p></section>
               <section className={styles.panel}>
                 <div className={styles.controlTitle}>160시간 감각 잡기</div>
