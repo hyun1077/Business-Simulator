@@ -82,6 +82,8 @@ export type AppSchedule = {
   timeUnit: number;
   hourlySalesProjection: Record<number, number>;
   assignments: Record<string, Record<number, string[]>>;
+  staffTemplates?: Record<string, Record<string, number[]>>;
+  absenceOverrides?: Record<string, string[]>;
   seasonProfiles?: Array<{
     id: string;
     name: string;
@@ -188,6 +190,29 @@ function normalizeAppData(raw: Partial<AppData> | null | undefined): AppData {
     schedules: Array.isArray(raw?.schedules)
       ? raw.schedules.map((schedule) => ({
           ...schedule,
+          staffTemplates:
+            schedule.staffTemplates && typeof schedule.staffTemplates === "object"
+              ? Object.fromEntries(
+                  Object.entries(schedule.staffTemplates).map(([staffId, dayMap]) => [
+                    staffId,
+                    Object.fromEntries(
+                      Object.entries(dayMap ?? {}).map(([day, slots]) => [
+                        day,
+                        Array.isArray(slots) ? slots.map((slot) => Number(slot)).filter((slot) => Number.isFinite(slot)) : [],
+                      ]),
+                    ),
+                  ]),
+                )
+              : {},
+          absenceOverrides:
+            schedule.absenceOverrides && typeof schedule.absenceOverrides === "object"
+              ? Object.fromEntries(
+                  Object.entries(schedule.absenceOverrides).map(([dateKey, staffIds]) => [
+                    dateKey,
+                    Array.isArray(staffIds) ? staffIds.filter((staffId) => typeof staffId === "string") : [],
+                  ]),
+                )
+              : {},
           seasonProfiles: Array.isArray(schedule.seasonProfiles) ? schedule.seasonProfiles : [],
           activeSeasonProfileId: schedule.activeSeasonProfileId ?? null,
         }))

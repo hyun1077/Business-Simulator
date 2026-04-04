@@ -42,6 +42,17 @@ type StaffMember = {
 type ScheduleSnapshot = {
   timeUnit: number;
   assignments: Record<string, Record<number, string[]>>;
+  staffTemplates?: Record<string, Record<string, number[]>>;
+  absenceOverrides?: Record<string, string[]>;
+  seasonProfiles?: Array<{
+    id: string;
+    name: string;
+    dayTypes: Record<string, "NORMAL" | "PEAK">;
+    normalHourlyProjection: Record<number, number>;
+    peakHourlyProjection: Record<number, number>;
+  }>;
+  activeSeasonProfileId?: string | null;
+  hourlySalesProjection?: Record<number, number>;
 } | null;
 
 type StoreInfo = {
@@ -70,6 +81,8 @@ type ContractDraft = {
 type StaffForm = Omit<StaffMember, "id" | "holidayWage" | "bonusWage" | "capacity" | "incentive">;
 type EmploymentInsuranceScale = "UNDER_150" | "PRIORITY_SUPPORT" | "MID_SIZED" | "LARGE_PUBLIC";
 type IndustrialAccidentPreset = "GENERAL_SERVICE" | "RETAIL" | "RESTAURANT_CAFE" | "MANUFACTURING" | "CUSTOM";
+type StaffTemplateMap = Record<string, Record<string, number[]>>;
+type AbsenceOverrideMap = Record<string, string[]>;
 
 const WEEK = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CAL = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -129,6 +142,72 @@ const INDUSTRIAL_ACCIDENT_RATE_MAP: Record<Exclude<IndustrialAccidentPreset, "CU
   MANUFACTURING: { label: "제조/생산", rate: 1.00, note: "제조·생산 현장 예시값입니다." },
 };
 
+function createEmptyTemplateMap(staffList: StaffMember[]) {
+  return Object.fromEntries(
+    staffList.map((member) => [member.id, Object.fromEntries(WEEK.map((day) => [day, [] as number[]]))]),
+  ) as StaffTemplateMap;
+}
+
+function normalizeTemplateMap(staffList: StaffMember[], schedule: ScheduleSnapshot) {
+  const next = createEmptyTemplateMap(staffList);
+  if (schedule?.staffTemplates) {
+    Object.entries(schedule.staffTemplates).forEach(([staffId, dayMap]) => {
+      if (!next[staffId]) next[staffId] = Object.fromEntries(WEEK.map((day) => [day, [] as number[]])) as Record<string, number[]>;
+      WEEK.forEach((day) => {
+        next[staffId][day] = Array.from(new Set((dayMap?.[day] ?? []).map((slot) => Number(slot)).filter((slot) => Number.isFinite(slot)))).sort((a, b) => a - b);
+      });
+    });
+    return next;
+  }
+  if (!schedule?.assignments) return next;
+  staffList.forEach((member) => {
+    WEEK.forEach((day) => {
+      next[member.id][day] = Object.keys(schedule.assignments?.[day] ?? {})
+        .map(Number)
+        .filter((slot) => schedule.assignments?.[day]?.[slot]?.includes(member.id))
+        .sort((a, b) => a - b);
+    });
+  });
+  return next;
+}
+
+function buildAssignmentsFromTemplates(templateMap: StaffTemplateMap) {
+  const assignments = Object.fromEntries(WEEK.map((day) => [day, {} as Record<number, string[]>])) as Record<string, Record<number, string[]>>;
+  Object.entries(templateMap).forEach(([staffId, dayMap]) => {
+    WEEK.forEach((day) => {
+      (dayMap?.[day] ?? []).forEach((slot) => {
+        const current = assignments[day][slot] ?? [];
+        if (!current.includes(staffId)) assignments[day][slot] = [...current, staffId];
+      });
+    });
+  });
+  return assignments;
+}
+
+function toggleStaffTemplateSlot(templateMap: StaffTemplateMap, staffId: string, day: string, slot: number) {
+  const current = templateMap[staffId]?.[day] ?? [];
+  const has = current.includes(slot);
+  return {
+    ...templateMap,
+    [staffId]: {
+      ...(templateMap[staffId] ?? Object.fromEntries(WEEK.map((label) => [label, [] as number[]]))),
+      [day]: has ? current.filter((value) => value !== slot) : [...current, slot].sort((a, b) => a - b),
+    },
+  };
+}
+
+function normalizeAbsenceOverrides(raw?: AbsenceOverrideMap | null) {
+  return Object.fromEntries(Object.entries(raw ?? {}).map(([key, ids]) => [key, Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : []])) as AbsenceOverrideMap;
+}
+
+function absenceKey(year: number, month: number, date: number) {
+  return `${year}-${month}-${date}`;
+}
+
+function isAbsent(absenceOverrides: AbsenceOverrideMap, year: number, month: number, date: number, staffId: string) {
+  return (absenceOverrides[absenceKey(year, month, date)] ?? []).includes(staffId);
+}
+
 export function StaffManager({
   initialStaff,
   role,
@@ -141,12 +220,18 @@ export function StaffManager({
   storeInfo: StoreInfo;
 }) {
   const [pending, startTransition] = useTransition();
+  const [schedulePending, startScheduleTransition] = useTransition();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [scheduleNotice, setScheduleNotice] = useState("");
   const [staff, setStaff] = useState(initialStaff);
   const [selectedStaffId, setSelectedStaffId] = useState(initialStaff[0]?.id ?? "");
   const [targetYear, setTargetYear] = useState(new Date().getFullYear());
   const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
+  const [scheduleTimeUnit, setScheduleTimeUnit] = useState<20 | 30 | 60>(() => (schedule?.timeUnit === 30 || schedule?.timeUnit === 60 ? schedule.timeUnit : 20));
+  const [showEarlyTemplateSlots, setShowEarlyTemplateSlots] = useState(false);
+  const [templateMap, setTemplateMap] = useState<StaffTemplateMap>(() => normalizeTemplateMap(initialStaff, schedule));
+  const [absenceOverrides, setAbsenceOverrides] = useState<AbsenceOverrideMap>(() => normalizeAbsenceOverrides(schedule?.absenceOverrides));
   const [employmentInsuranceScale, setEmploymentInsuranceScale] = useState<EmploymentInsuranceScale>("UNDER_150");
   const [industrialAccidentPreset, setIndustrialAccidentPreset] = useState<IndustrialAccidentPreset>(() => inferIndustrialAccidentPreset(storeInfo.businessType));
   const [customIndustrialAccidentRate, setCustomIndustrialAccidentRate] = useState(0.7);
@@ -183,6 +268,15 @@ export function StaffManager({
     () => normalizeStaffForm(form, employmentInsuranceScale, industrialAccidentPreset, customIndustrialAccidentRate),
     [customIndustrialAccidentRate, employmentInsuranceScale, form, industrialAccidentPreset],
   );
+  const combinedAssignments = useMemo(() => buildAssignmentsFromTemplates(templateMap), [templateMap]);
+  const templateSlots = useMemo(
+    () => Array.from({ length: (24 * 60) / scheduleTimeUnit }, (_, index) => index * scheduleTimeUnit),
+    [scheduleTimeUnit],
+  );
+  const visibleTemplateSlots = useMemo(
+    () => templateSlots.filter((slot) => (showEarlyTemplateSlots ? true : slot >= 540)),
+    [showEarlyTemplateSlots, templateSlots],
+  );
 
   useEffect(() => {
     if (staff.length > 0 && !staff.some((item) => item.id === selectedStaffId)) {
@@ -195,24 +289,28 @@ export function StaffManager({
     [selectedStaffId, staff],
   );
 
-  const weeklyRows = useMemo(() => getWeeklyRows(schedule, selectedStaff), [schedule, selectedStaff]);
+  const weeklyRows = useMemo(
+    () => getWeeklyRows({ timeUnit: scheduleTimeUnit, assignments: combinedAssignments }, selectedStaff),
+    [combinedAssignments, scheduleTimeUnit, selectedStaff],
+  );
 
   const calendarLogs = useMemo(() => {
-    if (!schedule || !selectedStaff) return {};
+    if (!selectedStaff) return {};
     const result: Record<string, { start: number; end: number; hours: number }> = {};
-    const slots = Array.from({ length: (24 * 60) / schedule.timeUnit }, (_, index) => index * schedule.timeUnit);
+    const slots = Array.from({ length: (24 * 60) / scheduleTimeUnit }, (_, index) => index * scheduleTimeUnit);
     const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
     for (let date = 1; date <= daysInMonth; date += 1) {
+      if (isAbsent(absenceOverrides, targetYear, targetMonth, date, selectedStaff.id)) continue;
       const day = CAL[new Date(targetYear, targetMonth - 1, date).getDay()];
-      const matched = slots.filter((slot) => schedule.assignments?.[day]?.[slot]?.includes(selectedStaff.id));
+      const matched = slots.filter((slot) => combinedAssignments?.[day]?.[slot]?.includes(selectedStaff.id));
       if (matched.length) {
         const start = Math.min(...matched);
-        const end = Math.max(...matched) + schedule.timeUnit;
+        const end = Math.max(...matched) + scheduleTimeUnit;
         result[String(date)] = { start, end, hours: (end - start) / 60 };
       }
     }
     return result;
-  }, [schedule, selectedStaff, targetMonth, targetYear]);
+  }, [absenceOverrides, combinedAssignments, scheduleTimeUnit, selectedStaff, targetMonth, targetYear]);
 
   const actualMonthHours = useMemo(
     () => Object.values(calendarLogs).reduce((sum, item) => sum + item.hours, 0),
@@ -281,6 +379,10 @@ export function StaffManager({
         }
 
         setStaff((prev) => [data.staff!, ...prev]);
+        setTemplateMap((prev) => ({
+          ...prev,
+          [data.staff!.id]: Object.fromEntries(WEEK.map((day) => [day, [] as number[]])),
+        }));
         setSelectedStaffId(data.staff.id);
         setNotice("직원 정보가 저장되었습니다.");
         setForm((prev) => ({
@@ -298,6 +400,31 @@ export function StaffManager({
         }));
       } catch {
         setError("직원 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    });
+  }
+
+  async function saveTemplateSchedule() {
+    setScheduleNotice("");
+    startScheduleTransition(async () => {
+      try {
+        const response = await fetch("/api/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            timeUnit: scheduleTimeUnit,
+            hourlySalesProjection: schedule?.hourlySalesProjection ?? Object.fromEntries(Array.from({ length: 24 }, (_, hour) => [hour, 0])),
+            assignments: combinedAssignments,
+            staffTemplates: templateMap,
+            absenceOverrides,
+            seasonProfiles: schedule?.seasonProfiles ?? [],
+            activeSeasonProfileId: schedule?.activeSeasonProfileId ?? null,
+          }),
+        });
+        const { message } = await readApiResponse<{ message?: string }>(response);
+        setScheduleNotice(response.ok ? "개별 시간표를 저장했습니다. 스케줄 관리 탭에서도 같은 배정표로 합쳐집니다." : message ?? "개별 시간표 저장에 실패했습니다.");
+      } catch {
+        setScheduleNotice("개별 시간표 저장 중 오류가 발생했습니다.");
       }
     });
   }
@@ -518,6 +645,75 @@ export function StaffManager({
 
             <section style={panelBox}>
               <div style={splitHeader}>
+                <div>
+                  <h2 style={sectionTitle}>직원별 주간 시간표</h2>
+                  <p style={helpText}>여기서 직원 A, B의 개인 시간표를 각각 작성하면 스케줄 관리 탭에서 자동으로 합쳐집니다.</p>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <div style={miniBadge}>현재 {scheduleTimeUnit}분 단위</div>
+                  <button type="button" onClick={() => setShowEarlyTemplateSlots((prev) => !prev)} style={secondaryButton}>
+                    {showEarlyTemplateSlots ? "새벽 접기" : "새벽 펼치기"}
+                  </button>
+                  <button type="button" onClick={saveTemplateSchedule} disabled={schedulePending || !selectedStaff} style={primaryButton}>
+                    {schedulePending ? "저장 중..." : "개별 시간표 저장"}
+                  </button>
+                </div>
+              </div>
+              {selectedStaff ? (
+                <>
+                  <div style={subtleBox}>
+                    <div style={summaryRow}><span>{selectedStaff.name} 실제 월 근무시간</span><strong>{actualMonthHours.toFixed(1)}h</strong></div>
+                    <div style={summaryRow}><span>결근 반영 일수</span><strong>{Object.keys(calendarLogs).length}일 근무</strong></div>
+                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>스케줄 관리 탭에서 결근을 입력하면 이 달력과 월 근무시간도 같이 줄어듭니다.</div>
+                  </div>
+                  <div style={templateTableWrap}>
+                    <table style={templateTable}>
+                      <thead>
+                        <tr>
+                          <th style={templateHeadCell}>시간</th>
+                          {WEEK.map((day) => (
+                            <th key={day} style={templateHeadCell}>{day}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!showEarlyTemplateSlots ? (
+                          <tr>
+                            <td colSpan={8} style={templateCollapsedRow}>새벽 시간은 숨김 상태입니다.</td>
+                          </tr>
+                        ) : null}
+                        {visibleTemplateSlots.map((slot) => {
+                          const isHourStart = slot % 60 === 0;
+                          return (
+                            <tr key={slot}>
+                              <td style={{ ...templateTimeCell, ...(isHourStart ? templateHourCell : {}) }}>{formatTime(slot)}</td>
+                              {WEEK.map((day) => {
+                                const active = (templateMap[selectedStaff.id]?.[day] ?? []).includes(slot);
+                                return (
+                                  <td
+                                    key={`${day}-${slot}`}
+                                    style={{ ...templateSlotCell, ...(isHourStart ? templateHourCell : {}), ...(active ? templateSlotActive : {}) }}
+                                    onClick={() => setTemplateMap((prev) => toggleStaffTemplateSlot(prev, selectedStaff.id, day, slot))}
+                                  >
+                                    {active ? <span style={templateSlotBadge}>{selectedStaff.name}</span> : null}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {scheduleNotice ? <div style={noticeText}>{scheduleNotice}</div> : null}
+                </>
+              ) : (
+                <div style={muted}>직원을 선택하면 개인 시간표를 바로 작성할 수 있습니다.</div>
+              )}
+            </section>
+
+            <section style={panelBox}>
+              <div style={splitHeader}>
                 <h2 style={sectionTitle}>직원 스케줄 달력</h2>
                 <div style={{ display: "flex", gap: 8 }}>
                   <select value={targetYear} onChange={(event) => setTargetYear(Number(event.target.value))} style={miniInput}>
@@ -530,7 +726,7 @@ export function StaffManager({
               </div>
               {!selectedStaff ? (
                 <div style={muted}>직원을 선택해주세요.</div>
-              ) : !schedule ? (
+              ) : Object.values(combinedAssignments).every((daySlots) => Object.keys(daySlots).length === 0) ? (
                 <div style={muted}>저장된 스케줄이 아직 없습니다.</div>
               ) : (
                 <>
@@ -1172,6 +1368,16 @@ const insuranceBullet = { color: "#cbd5e1", fontSize: 12, lineHeight: 1.65, marg
 const employmentGuideRow = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", columnGap: 10, rowGap: 2, alignItems: "center", paddingTop: 8 } as const;
 const weekGrid = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", marginBottom: 16 } as const;
 const calendarGrid = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8 } as const;
+const templateTableWrap = { overflow: "auto", border: "1px solid #1e293b", borderRadius: 18, background: "#020617" } as const;
+const templateTable = { width: "100%", minWidth: 860, borderCollapse: "collapse" } as const;
+const templateHeadCell = { position: "sticky", top: 0, background: "#111827", padding: "10px 8px", borderBottom: "1px solid #1e293b", borderRight: "1px solid #1e293b", fontSize: 12, color: "#cbd5e1" } as const;
+const templateTimeCell = { padding: "8px 10px", borderBottom: "1px solid #1e293b", borderRight: "1px solid #1e293b", background: "#0b1220", fontSize: 12, color: "#cbd5e1", minWidth: 78 } as const;
+const templateHourCell = { borderTop: "2px solid #334155" } as const;
+const templateSlotCell = { minWidth: 88, height: 34, padding: 6, borderBottom: "1px solid #1e293b", borderRight: "1px solid #1e293b", cursor: "pointer", textAlign: "center", background: "#020617" } as const;
+const templateSlotActive = { background: "rgba(16, 185, 129, 0.12)" } as const;
+const templateSlotBadge = { display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#10b981", color: "#052e16", fontSize: 11, fontWeight: 700 } as const;
+const templateCollapsedRow = { padding: 12, textAlign: "center", color: "#94a3b8", background: "#0b1220", borderBottom: "1px solid #1e293b" } as const;
+const miniBadge = { padding: "8px 12px", borderRadius: 999, background: "#081121", border: "1px solid #22304a", color: "#a7f3d0", fontSize: 12, fontWeight: 700 } as const;
 const dayHead = { textAlign: "center", fontSize: 12, color: "#64748b", paddingBottom: 6 } as const;
 const calendarCell = { minHeight: 84, padding: 10, borderRadius: 14, border: "1px solid #1e293b", background: "#020617", display: "flex", flexDirection: "column", justifyContent: "space-between" } as const;
 const contractLayout = { display: "grid", gap: 16, gridTemplateColumns: "minmax(320px, 460px) 1fr" } as const;

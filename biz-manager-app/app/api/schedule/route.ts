@@ -7,6 +7,8 @@ const bodySchema = z.object({
   timeUnit: z.number().int().positive(),
   hourlySalesProjection: z.record(z.string(), z.number().int().min(0)),
   assignments: z.record(z.string(), z.record(z.string(), z.array(z.string()))),
+  staffTemplates: z.record(z.string(), z.record(z.string(), z.array(z.number().int().min(0)))).optional(),
+  absenceOverrides: z.record(z.string(), z.array(z.string())).optional(),
   seasonProfiles: z
     .array(
       z.object({
@@ -50,6 +52,15 @@ export async function POST(request: Request) {
         Object.fromEntries(Object.entries(slots).map(([time, staffIds]) => [Number(time), staffIds])),
       ]),
     ) as Record<string, Record<number, string[]>>,
+    staffTemplates: Object.fromEntries(
+      Object.entries(body.staffTemplates ?? {}).map(([staffId, dayMap]) => [
+        staffId,
+        Object.fromEntries(Object.entries(dayMap).map(([day, slots]) => [day, slots.map((slot) => Number(slot))])),
+      ]),
+    ) as Record<string, Record<string, number[]>>,
+    absenceOverrides: Object.fromEntries(
+      Object.entries(body.absenceOverrides ?? {}).map(([dateKey, staffIds]) => [dateKey, staffIds]),
+    ) as Record<string, string[]>,
     seasonProfiles: (body.seasonProfiles ?? []).map((profile) => ({
       ...profile,
       normalHourlyProjection: Object.fromEntries(

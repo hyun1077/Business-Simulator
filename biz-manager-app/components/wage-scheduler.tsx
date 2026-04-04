@@ -12,6 +12,8 @@ const COLOR_FALLBACKS: Record<string, string> = { "bg-red-500": "#ef4444", "bg-o
 
 type TabId = "schedule" | "analysis" | "summary";
 type ScheduleShape = Record<string, Record<number, string[]>>;
+type StaffTemplateMap = Record<string, Record<string, number[]>>;
+type AbsenceOverrideMap = Record<string, string[]>;
 type Pattern = { id: string; name: string; data: Record<number, number> };
 type SeasonProfile = {
   id: string;
@@ -22,7 +24,7 @@ type SeasonProfile = {
 };
 type MonthlyLog = { startTime: number; endTime: number; breakHours: number };
 type Snapshot = { isSaved: boolean; staffSnapshot: Staff[]; dailyLogs: Record<string, MonthlyLog> };
-type Staff = { id: string; name: string; color: string; baseWage: number; targetWage: number; holidayWage: number; bonusWage: number; capacity: number; incentive: number; expectedSales?: number; performanceBonus?: number; mealAllowance?: number; transportAllowance?: number; otherAllowance?: number; employmentType?: "HOURLY" | "MONTHLY"; monthlySalary?: number; expectedMonthlyHours?: number; insuranceType?: "NONE" | "FREELANCER" | "FOUR_INSURANCE"; insuranceRate?: number };
+type Staff = { id: string; name: string; color: string; baseWage: number; targetWage: number; holidayWage: number; bonusWage: number; capacity: number; incentive: number; expectedSales?: number; performanceBonus?: number; mealAllowance?: number; transportAllowance?: number; otherAllowance?: number; employmentType?: "HOURLY" | "MONTHLY"; monthlySalary?: number; expectedMonthlyHours?: number; weeklyWorkingHours?: number; weeklyWorkingDays?: number; insuranceType?: "NONE" | "FREELANCER" | "FOUR_INSURANCE"; insuranceRate?: number };
 type FinanceItem = { id: string; type: "REVENUE" | "EXPENSE"; category: string; amount: number; memo?: string | null };
 type EditForm = { start: string; end: string; break: number | string };
 
@@ -54,6 +56,74 @@ function createHourlyPattern(lunch: number, dinner: number, normal: number, lunc
 }
 function createInitialSchedule(): ScheduleShape { return Object.fromEntries(SCHEDULE_DAYS.map((day) => [day, {} as Record<number, string[]>])); }
 function mergeSchedule(raw?: ScheduleShape | null) { const base = createInitialSchedule(); if (!raw) return base; SCHEDULE_DAYS.forEach((day) => { base[day] = raw[day] ?? {}; }); return base; }
+function createEmptyStaffTemplates(staffList: Staff[]): StaffTemplateMap {
+  return Object.fromEntries(staffList.map((member) => [member.id, Object.fromEntries(SCHEDULE_DAYS.map((day) => [day, [] as number[]]))])) as StaffTemplateMap;
+}
+function normalizeStaffTemplates(staffList: Staff[], raw?: StaffTemplateMap | null, assignments?: ScheduleShape | null) {
+  const next = createEmptyStaffTemplates(staffList);
+  if (raw) {
+    Object.entries(raw).forEach(([staffId, dayMap]) => {
+      if (!next[staffId]) next[staffId] = Object.fromEntries(SCHEDULE_DAYS.map((day) => [day, [] as number[]])) as Record<string, number[]>;
+      SCHEDULE_DAYS.forEach((day) => {
+        next[staffId][day] = Array.from(new Set((dayMap?.[day] ?? []).map((slot) => Number(slot)).filter((slot) => Number.isFinite(slot)))).sort((a, b) => a - b);
+      });
+    });
+    return next;
+  }
+  const mergedAssignments = mergeSchedule(assignments);
+  staffList.forEach((member) => {
+    SCHEDULE_DAYS.forEach((day) => {
+      next[member.id][day] = Object.keys(mergedAssignments[day] ?? {})
+        .map(Number)
+        .filter((slot) => mergedAssignments[day]?.[slot]?.includes(member.id))
+        .sort((a, b) => a - b);
+    });
+  });
+  return next;
+}
+function buildCombinedSchedule(staffTemplates: StaffTemplateMap) {
+  const combined = createInitialSchedule();
+  Object.entries(staffTemplates).forEach(([staffId, dayMap]) => {
+    SCHEDULE_DAYS.forEach((day) => {
+      (dayMap?.[day] ?? []).forEach((slot) => {
+        const ids = combined[day][slot] ?? [];
+        if (!ids.includes(staffId)) combined[day][slot] = [...ids, staffId];
+      });
+    });
+  });
+  return combined;
+}
+function toggleTemplateSlot(templates: StaffTemplateMap, staffId: string, day: string, slot: number) {
+  const currentSlots = templates[staffId]?.[day] ?? [];
+  const has = currentSlots.includes(slot);
+  return {
+    ...templates,
+    [staffId]: {
+      ...(templates[staffId] ?? Object.fromEntries(SCHEDULE_DAYS.map((label) => [label, [] as number[]]))),
+      [day]: has ? currentSlots.filter((value) => value !== slot) : [...currentSlots, slot].sort((a, b) => a - b),
+    },
+  };
+}
+function normalizeAbsenceOverrides(raw?: AbsenceOverrideMap | null) {
+  return Object.fromEntries(Object.entries(raw ?? {}).map(([key, value]) => [key, Array.isArray(value) ? value.filter((staffId) => typeof staffId === "string") : []])) as AbsenceOverrideMap;
+}
+function absenceKey(year: number, month: number, date: number) {
+  return `${year}-${month}-${date}`;
+}
+function hasAbsence(absenceOverrides: AbsenceOverrideMap, year: number, month: number, date: number, staffId: string) {
+  return (absenceOverrides[absenceKey(year, month, date)] ?? []).includes(staffId);
+}
+function updateAbsenceOverride(absenceOverrides: AbsenceOverrideMap, year: number, month: number, date: number, staffId: string, absent: boolean) {
+  const key = absenceKey(year, month, date);
+  const current = absenceOverrides[key] ?? [];
+  const nextIds = absent ? Array.from(new Set([...current, staffId])) : current.filter((id) => id !== staffId);
+  if (nextIds.length === 0) {
+    const next = { ...absenceOverrides };
+    delete next[key];
+    return next;
+  }
+  return { ...absenceOverrides, [key]: nextIds };
+}
 function formatTime(minutes: number | null | undefined) { if (minutes === null || minutes === undefined) return "--:--"; const hour = Math.floor(minutes / 60); const minute = minutes % 60; return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`; }
 function calcBreakHours(grossHours: number) { if (grossHours > 8) return 1; if (grossHours > 4) return 0.5; return 0; }
 function sum(values: number[]) { return values.reduce((acc, value) => acc + (Number(value) || 0), 0); }
@@ -77,13 +147,31 @@ function buildWeeklyStaffSummary(staffList: Staff[], schedule: ScheduleShape, ti
     return { staffId: member.id, staffName: member.name, weeklyNet, workPayWeekly, monthlyTotalPay: (workPayWeekly + holidayAllowanceAmount) * 4 + member.incentive };
   });
 }
+function getRestaurantGuide(staffList: Staff[]) {
+  const monthlyHours = 160;
+  const weeklyHours = monthlyHours / 4.345;
+  const averageExpectedSales = staffList.length ? Math.round(sum(staffList.map((member) => member.expectedSales ?? member.capacity ?? 0)) / staffList.length) : 0;
+  return {
+    monthlyHours,
+    weeklyHours,
+    fiveDayShiftHours: weeklyHours / 5,
+    sixDayShiftHours: weeklyHours / 6,
+    averageExpectedSales,
+  };
+}
+function getAverageAssignedHeadcount(schedule: ScheduleShape, timeUnit: number, hour: number) {
+  const slots = Array.from({ length: Math.ceil(60 / timeUnit) }, (_, index) => hour * 60 + index * timeUnit).filter((slot) => slot < (hour + 1) * 60);
+  const total = SCHEDULE_DAYS.reduce((daySum, day) => daySum + slots.reduce((slotSum, slot) => slotSum + (schedule[day]?.[slot]?.length ?? 0), 0), 0);
+  return slots.length > 0 ? total / (slots.length * SCHEDULE_DAYS.length) : 0;
+}
 
 export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]; financeItems: FinanceItem[]; canEdit: boolean }) {
   const [tab, setTab] = useState<TabId>("schedule");
   const [timeUnit, setTimeUnit] = useState<20 | 30 | 60>(20);
   const [showEarlyHours, setShowEarlyHours] = useState(false);
   const [businessHours, setBusinessHours] = useState({ start: 10, end: 22 });
-  const [schedule, setSchedule] = useState<ScheduleShape>(createInitialSchedule);
+  const [staffTemplates, setStaffTemplates] = useState<StaffTemplateMap>(() => createEmptyStaffTemplates(staff));
+  const [absenceOverrides, setAbsenceOverrides] = useState<AbsenceOverrideMap>({});
   const [selectedStaffId, setSelectedStaffId] = useState(staff[0]?.id ?? "");
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -105,8 +193,10 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
 
   const activeSlots = useMemo(() => Array.from({ length: (24 * 60) / timeUnit }, (_, index) => index * timeUnit), [timeUnit]);
   const visibleSlots = useMemo(() => activeSlots.filter((slot) => (showEarlyHours ? true : slot >= 540)), [activeSlots, showEarlyHours]);
+  const schedule = useMemo(() => buildCombinedSchedule(staffTemplates), [staffTemplates]);
   const selectedStaff = useMemo(() => staff.find((member) => member.id === selectedStaffId) ?? staff[0] ?? null, [selectedStaffId, staff]);
   const weeklySummary = useMemo(() => buildWeeklyStaffSummary(staff, schedule, timeUnit, activeSlots), [staff, schedule, timeUnit, activeSlots]);
+  const restaurantGuide = useMemo(() => getRestaurantGuide(staff), [staff]);
   const activeSeasonProfile = useMemo(
     () => seasonProfiles.find((profile) => profile.id === activeSeasonProfileId) ?? seasonProfiles[0] ?? null,
     [activeSeasonProfileId, seasonProfiles],
@@ -127,12 +217,15 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
         const { data, message } = await readApiResponse<{ schedule?: {
           assignments: ScheduleShape;
           timeUnit: number;
+          staffTemplates?: StaffTemplateMap;
+          absenceOverrides?: AbsenceOverrideMap;
           seasonProfiles?: SeasonProfile[];
           activeSeasonProfileId?: string | null;
           hourlySalesProjection?: Record<number, number>;
         }; message?: string }>(response);
         if (data?.schedule) {
-          setSchedule(mergeSchedule(data.schedule.assignments));
+          setStaffTemplates(normalizeStaffTemplates(staff, data.schedule.staffTemplates, data.schedule.assignments));
+          setAbsenceOverrides(normalizeAbsenceOverrides(data.schedule.absenceOverrides));
           const nextTimeUnit = data.schedule.timeUnit === 30 || data.schedule.timeUnit === 60 ? data.schedule.timeUnit : 20;
           setTimeUnit(nextTimeUnit);
           const loadedSeasonProfiles =
@@ -148,7 +241,8 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
           const activeProfile = loadedSeasonProfiles.find((profile: SeasonProfile) => profile.id === loadedSeasonId) ?? loadedSeasonProfiles[0];
           setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(data.schedule.hourlySalesProjection ?? {}) });
         } else {
-          setSchedule(createInitialSchedule());
+          setStaffTemplates(createEmptyStaffTemplates(staff));
+          setAbsenceOverrides({});
           if (message) {
             setSaveMessage(message);
           }
@@ -160,7 +254,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
       }
     }
     void loadSchedule();
-  }, []);
+  }, [staff]);
 
   useEffect(() => {
     if (tab === "schedule" && row11AmRef.current) row11AmRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -168,12 +262,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
 
   function handleCellToggle(day: string, slot: number) {
     if (!canEdit || !selectedStaff) return;
-    setSchedule((prev) => {
-      const daySlots = prev[day] || {};
-      const currentIds = daySlots[slot] || [];
-      const nextIds = currentIds.includes(selectedStaff.id) ? currentIds.filter((id) => id !== selectedStaff.id) : [...currentIds, selectedStaff.id];
-      return { ...prev, [day]: { ...daySlots, [slot]: nextIds } };
-    });
+    setStaffTemplates((prev) => toggleTemplateSlot(prev, selectedStaff.id, day, slot));
   }
 
   async function saveSchedule() {
@@ -181,7 +270,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     setSaving(true);
     setSaveMessage("");
     try {
-      const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule, seasonProfiles, activeSeasonProfileId }) });
+      const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit, hourlySalesProjection, assignments: schedule, staffTemplates, absenceOverrides, seasonProfiles, activeSeasonProfileId }) });
       const { message } = await readApiResponse<{ message?: string }>(response);
       setSaveMessage(response.ok ? "스케줄이 저장되었습니다." : message ?? "스케줄 저장에 실패했습니다.");
     } catch {
@@ -274,6 +363,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     const daysInMonth = new Date(year, month, 0).getDate();
     staff.forEach((member) => {
       for (let date = 1; date <= daysInMonth; date += 1) {
+        if (hasAbsence(absenceOverrides, year, month, date, member.id)) continue;
         const dayLabel = CALENDAR_DAYS[new Date(year, month - 1, date).getDay()];
         const dateKey = `${year}-${month}-${date}-${member.id}`;
         const slots = activeSlots.filter((slot) => schedule?.[dayLabel]?.[slot]?.includes(member.id));
@@ -296,7 +386,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
       if (year === targetYear && month === targetMonth) value === "DELETE" ? delete merged[key] : (merged[key] = value);
     });
     return merged;
-  }, [activeSlots, manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, timeUnit]);
+  }, [absenceOverrides, activeSlots, manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, timeUnit]);
 
   const monthlyStats = useMemo(() => {
     const monthKey = `${targetYear}-${targetMonth}`;
@@ -342,6 +432,20 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     });
     return { hour, sales, laborCost, capacity };
   }), [activeSlots, hourlySalesProjection, schedule, staff, timeUnit]);
+  const staffingGuide = useMemo(
+    () =>
+      hourlyChartData
+        .map((item) => ({
+          hour: item.hour,
+          sales: item.sales,
+          assignedHeads: getAverageAssignedHeadcount(schedule, timeUnit, item.hour),
+          recommendedHeads: restaurantGuide.averageExpectedSales > 0 ? Math.max(1, Math.ceil(item.sales / restaurantGuide.averageExpectedSales)) : 0,
+        }))
+        .filter((item) => item.sales > 0)
+        .sort((a, b) => b.sales - a.sales)
+        .slice(0, 4),
+    [hourlyChartData, restaurantGuide.averageExpectedSales, schedule, timeUnit],
+  );
 
   const chartMax = useMemo(() => Math.max(600000, ...hourlyChartData.flatMap((item) => [item.sales, item.laborCost, item.capacity])), [hourlyChartData]);
 
@@ -377,21 +481,29 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     if (!editingDate) return;
     const [sh, sm] = editForm.start.split(":").map(Number);
     const [eh, em] = editForm.end.split(":").map(Number);
+    const [year, month, date, staffId] = editingDate.split("-");
     setManualEdits((prev) => ({ ...prev, [editingDate]: { startTime: sh * 60 + sm, endTime: eh * 60 + em, breakHours: Number(editForm.break) || 0 } }));
+    setAbsenceOverrides((prev) => updateAbsenceOverride(prev, Number(year), Number(month), Number(date), staffId, false));
     setEditingDate(null);
   }
 
   function deleteLog(dateKey: string) {
+    const [year, month, date, staffId] = dateKey.split("-");
+    setAbsenceOverrides((prev) => updateAbsenceOverride(prev, Number(year), Number(month), Number(date), staffId, true));
     setManualEdits((prev) => ({ ...prev, [dateKey]: "DELETE" }));
+    setSaveMessage("결근 표시를 반영했습니다. 스케줄 저장을 누르면 직원 탭의 월 근무시간에도 같이 반영됩니다.");
     setEditingDate(null);
   }
 
   function revertLog(dateKey: string) {
+    const [year, month, date, staffId] = dateKey.split("-");
+    setAbsenceOverrides((prev) => updateAbsenceOverride(prev, Number(year), Number(month), Number(date), staffId, false));
     setManualEdits((prev) => {
       const next = { ...prev };
       delete next[dateKey];
       return next;
     });
+    setSaveMessage("결근 표시를 되돌렸습니다. 저장하면 직원 탭과 다시 동기화됩니다.");
     setEditingDate(null);
   }
 
@@ -432,7 +544,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
               <div className={styles.toolbar}>
                 <div>
                   <h2 className={styles.toolbarTitle}>주간 배정표</h2>
-                  <p className={styles.toolbarText}>스케줄 표를 먼저 보고 바로 수정할 수 있도록 공간을 압축했습니다.</p>
+                  <p className={styles.toolbarText}>직원 탭에서 만든 개인 시간표가 여기서 합쳐져 보입니다. 여기서 수정하면 선택한 직원의 개인 시간표가 함께 바뀝니다.</p>
                 </div>
                 {!canEdit ? <div className={styles.saveStatus}>직원 계정은 읽기 전용입니다.</div> : null}
               </div>
@@ -484,7 +596,33 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
             </section>
             <aside className={styles.controlPanel}>
               <section className={styles.panel}><div className={styles.controlTitle}>현재 보기</div><p className={styles.controlText}>시간 단위를 바꾸면 표, 주간 근무시간, 월별 달력 로그가 함께 다시 계산됩니다.</p></section>
+              <section className={styles.panel}>
+                <div className={styles.controlTitle}>160시간 감각 잡기</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div className={styles.weeklyCard}><div className={styles.weeklyNameRow}><span>월 160시간</span><span style={{ color: "#34d399" }}>주 {restaurantGuide.weeklyHours.toFixed(1)}h</span></div><div style={{ color: "#94a3b8", fontSize: 13 }}>주 5일이면 하루 {restaurantGuide.fiveDayShiftHours.toFixed(1)}h</div><div style={{ color: "#64748b", fontSize: 12 }}>주 6일이면 하루 {restaurantGuide.sixDayShiftHours.toFixed(1)}h</div></div>
+                  <div className={styles.controlText}>식당 운영에서는 오픈부터 마감까지 한 사람이 160시간을 채우기보다, 점심 피크와 저녁 피크에 시간을 몰아주는 편이 효율적입니다.</div>
+                </div>
+              </section>
               <section className={styles.panel}><div className={styles.controlTitle}>주간 요약</div><div style={{ display: "grid", gap: 10 }}>{weeklySummary.map((item) => <div key={item.staffId} className={styles.weeklyCard}><div className={styles.weeklyNameRow}><span>{item.staffName}</span><span style={{ color: "#34d399" }}>{item.weeklyNet.toFixed(1)}h</span></div><div style={{ color: "#94a3b8", fontSize: 13 }}>주급 {item.workPayWeekly.toLocaleString()}원</div><div style={{ color: "#64748b", fontSize: 12 }}>월 예상 {item.monthlyTotalPay.toLocaleString()}원</div></div>)}</div></section>
+              <section className={styles.panel}>
+                <div className={styles.controlTitle}>식당 추천 배치</div>
+                <p className={styles.controlText}>직원 기대매출 평균 {restaurantGuide.averageExpectedSales.toLocaleString()}원/h 기준으로, 매출 패턴이 높은 시간대에 필요한 평균 인원을 계산했습니다.</p>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {staffingGuide.map((item) => (
+                    <div key={item.hour} className={styles.weeklyCard}>
+                      <div className={styles.weeklyNameRow}>
+                        <span>{item.hour}시</span>
+                        <span style={{ color: item.assignedHeads >= item.recommendedHeads ? "#34d399" : "#f97316" }}>
+                          권장 {item.recommendedHeads}명
+                        </span>
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: 13 }}>예상 매출 {item.sales.toLocaleString()}원</div>
+                      <div style={{ color: "#64748b", fontSize: 12 }}>현재 배치 평균 {item.assignedHeads.toFixed(1)}명</div>
+                    </div>
+                  ))}
+                  {!staffingGuide.length ? <div className={styles.controlText}>시간대 매출 패턴과 직원 기대매출을 입력하면 추천 인원이 계산됩니다.</div> : null}
+                </div>
+              </section>
               <section className={styles.panel}><div className={styles.controlTitle}>배정 안내</div><p className={styles.controlText}>{canEdit ? "직원을 먼저 선택한 뒤 칸을 클릭하거나 드래그해서 배정할 수 있습니다." : "이 계정은 조회 전용입니다. 관리자 계정으로 로그인하면 직접 수정할 수 있습니다."}</p></section>
             </aside>
           </div>
