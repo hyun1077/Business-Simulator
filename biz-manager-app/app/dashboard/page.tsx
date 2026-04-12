@@ -1,6 +1,7 @@
 import { DashboardHome } from "@/components/dashboard-home";
 import { requireSession } from "@/lib/auth";
 import { readAppData } from "@/lib/file-db";
+import { getStoreMonthInsights } from "@/lib/store-insights";
 
 export default async function DashboardPage() {
   const session = await requireSession();
@@ -14,17 +15,18 @@ export default async function DashboardPage() {
 
   const storeFinance = data.finance.filter((item) => item.storeId === store.id);
   const storeStaff = data.staff.filter((item) => item.storeId === store.id);
-  const revenue = storeFinance.filter((item) => item.type === "REVENUE").reduce((sum, item) => sum + item.amount, 0);
-  const expense = storeFinance
-    .filter((item) => item.type === "EXPENSE")
-    .reduce((sum, item) => sum + (item.inputMode === "RATIO" ? Math.round(revenue * ((item.ratioPercent ?? 0) / 100)) : item.amount), 0);
-  const laborCost = storeStaff.reduce((sum, item) => {
-    const hours = item.expectedMonthlyHours || 160;
-    const payroll = item.employmentType === "MONTHLY" && item.monthlySalary > 0 ? item.monthlySalary : item.targetWage * hours;
-    const extra = item.mealAllowance + item.transportAllowance + item.otherAllowance + item.performanceBonus;
-    return sum + Math.round((payroll + extra) * (1 + item.insuranceRate / 100));
-  }, 0);
-  const profit = revenue - expense - laborCost;
+  const schedule = data.schedules.find((item) => item.storeId === store.id) ?? null;
+  const today = new Date();
+  const insights = getStoreMonthInsights({
+    staff: storeStaff,
+    financeItems: storeFinance,
+    schedule,
+    year: today.getFullYear(),
+    month: today.getMonth() + 1,
+    expectedMonthlyRevenue: Number(store.expectedMonthlyRevenue) || 0,
+    expectedProfitMarginRate: Number(store.expectedProfitMarginRate) || 25,
+    estimatedTaxRate: Number(store.estimatedTaxRate) || 10,
+  });
 
   return (
     <DashboardHome
@@ -38,16 +40,16 @@ export default async function DashboardPage() {
         name: store.name,
         code: store.code,
         businessType: store.businessType,
-        monthlyRevenue: revenue,
-        monthlyExpense: expense,
-        monthlyLaborCost: laborCost,
+        monthlyRevenue: insights.revenueBase,
+        monthlyExpense: insights.totalExpense,
+        monthlyLaborCost: insights.laborCost,
       }}
       kpi={{
-        revenue,
-        expense,
-        laborCost,
-        profit,
-        laborRatio: revenue > 0 ? (laborCost / revenue) * 100 : 0,
+        revenue: insights.revenueBase,
+        expense: insights.totalExpense,
+        laborCost: insights.laborCost,
+        profit: insights.netProfit,
+        laborRatio: insights.laborRatio,
       }}
     />
   );

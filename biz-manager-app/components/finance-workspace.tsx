@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition, type CSSProperties, type Dispatch, ty
 import { DollarSign, PencilLine, Receipt, Save, Trash2, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 import { readApiResponse } from "@/lib/client-api";
+import { entryAmount, getScheduleAssignments, getStoreMonthInsights } from "@/lib/store-insights";
 import type { SystemRole } from "@/types/domain";
 
 type FinanceItem = {
@@ -52,6 +53,8 @@ type SeasonProfile = {
 type ScheduleSnapshot = {
   timeUnit: number;
   assignments: Record<string, Record<number, string[]>>;
+  staffTemplates?: Record<string, Record<string, number[]>>;
+  absenceOverrides?: Record<string, string[]>;
   seasonProfiles?: SeasonProfile[];
   activeSeasonProfileId?: string | null;
 } | null;
@@ -113,14 +116,34 @@ export function FinanceWorkspace({
   const [editing, setEditing] = useState<EntryForm | null>(null);
   const [scheduleState, setScheduleState] = useState(() => normalizeSchedule(schedule));
 
-  const monthItems = useMemo(() => items.filter((item) => {
-    const d = new Date(item.targetDate);
-    return d.getFullYear() === targetYear && d.getMonth() + 1 === targetMonth;
-  }).sort((a, b) => b.targetDate.localeCompare(a.targetDate)), [items, targetMonth, targetYear]);
-  const realRevenue = useMemo(() => monthItems.filter((item) => item.type === "REVENUE").reduce((sum, item) => sum + item.amount, 0), [monthItems]);
-  const revenueBase = realRevenue > 0 ? realRevenue : settings.expectedMonthlyRevenue;
-  const expenseItems = useMemo(() => monthItems.filter((item) => item.type === "EXPENSE").map((item) => ({ ...item, computedAmount: entryAmount(item, revenueBase) })), [monthItems, revenueBase]);
-  const totalExpense = useMemo(() => expenseItems.reduce((sum, item) => sum + item.computedAmount, 0), [expenseItems]);
+  const monthItems = useMemo(
+    () =>
+      items
+        .filter((item) => {
+          const d = new Date(item.targetDate);
+          return d.getFullYear() === targetYear && d.getMonth() + 1 === targetMonth;
+        })
+        .sort((a, b) => b.targetDate.localeCompare(a.targetDate)),
+    [items, targetMonth, targetYear],
+  );
+  const financeSummary = useMemo(
+    () =>
+      getStoreMonthInsights({
+        staff: initialStaff,
+        financeItems: items,
+        schedule: scheduleState,
+        year: targetYear,
+        month: targetMonth,
+        expectedMonthlyRevenue: settings.expectedMonthlyRevenue,
+        expectedProfitMarginRate: settings.expectedProfitMarginRate,
+        estimatedTaxRate: settings.estimatedTaxRate,
+      }),
+    [initialStaff, items, scheduleState, settings.estimatedTaxRate, settings.expectedMonthlyRevenue, settings.expectedProfitMarginRate, targetMonth, targetYear],
+  );
+  const realRevenue = financeSummary.realRevenue;
+  const revenueBase = financeSummary.revenueBase;
+  const expenseItems = financeSummary.expenseItems;
+  const totalExpense = financeSummary.totalExpense;
   const dailyTotals = useMemo(() => {
     const map = new Map<string, DayTotals>();
     monthItems.forEach((item) => {
@@ -135,33 +158,29 @@ export function FinanceWorkspace({
   const filtered = useMemo(() => filter === "ALL" ? monthItems : monthItems.filter((item) => item.type === filter), [filter, monthItems]);
   const activeProfile = useMemo(() => scheduleState.seasonProfiles.find((profile) => profile.id === scheduleState.activeSeasonProfileId) ?? scheduleState.seasonProfiles[0] ?? null, [scheduleState]);
   const avgProjection = useMemo(() => activeProfile ? averageProfile(activeProfile) : makePattern(0, 0, 0, 0, 0), [activeProfile]);
+  const assignmentView = useMemo(() => getScheduleAssignments(scheduleState), [scheduleState]);
   const hourlyChart = useMemo(() => Array.from({ length: 24 }, (_, hour) => {
     const sales = avgProjection[hour] || 0;
     const slots = Array.from({ length: Math.ceil(60 / scheduleState.timeUnit) }, (_, i) => hour * 60 + i * scheduleState.timeUnit).filter((slot) => slot < (hour + 1) * 60);
     let labor = 0;
     let expected = 0;
-    slots.forEach((slot) => WORK_DAYS.forEach((day) => (scheduleState.assignments[day]?.[slot] || []).forEach((staffId) => {
+    slots.forEach((slot) => WORK_DAYS.forEach((day) => (assignmentView[day]?.[slot] || []).forEach((staffId) => {
       const member = initialStaff.find((item) => item.id === staffId);
       if (!member) return;
       labor += member.targetWage * (scheduleState.timeUnit / 60) / 7;
       expected += (member.expectedSales || member.capacity || 0) * (scheduleState.timeUnit / 60) / 7;
     })));
     return { hour, sales, labor, expected };
-  }), [avgProjection, initialStaff, scheduleState]);
+  }), [assignmentView, avgProjection, initialStaff, scheduleState.timeUnit]);
   const chartMax = useMemo(() => Math.max(300000, ...hourlyChart.flatMap((item) => [item.sales, item.labor, item.expected])), [hourlyChart]);
-  const staffContribution = useMemo(() => initialStaff.map((member) => {
-    const hours = scheduledHours(scheduleState.timeUnit, scheduleState.assignments, member.id, targetYear, targetMonth) || member.expectedMonthlyHours;
-    const extra = (member.mealAllowance || 0) + (member.transportAllowance || 0) + (member.otherAllowance || 0) + (member.performanceBonus || member.incentive || 0);
-    const wageCost = member.employmentType === "MONTHLY" && member.monthlySalary > 0 ? member.monthlySalary : member.targetWage * hours;
-    const employerCost = Math.round((wageCost + extra) * (1 + (member.insuranceRate || 0) / 100));
-    const expectedRevenue = Math.round((member.expectedSales || member.capacity || 0) * hours);
-    const marginProfit = Math.round(expectedRevenue * (settings.expectedProfitMarginRate / 100));
-    return { ...member, hours, employerCost, expectedRevenue, ownerContribution: marginProfit - employerCost };
-  }), [initialStaff, scheduleState, settings.expectedProfitMarginRate, targetMonth, targetYear]);
-  const laborCost = useMemo(() => staffContribution.reduce((sum, item) => sum + item.employerCost, 0), [staffContribution]);
-  const preTaxProfit = revenueBase - totalExpense - laborCost;
-  const estimatedTax = Math.max(preTaxProfit, 0) * (settings.estimatedTaxRate / 100);
-  const netProfit = preTaxProfit - estimatedTax;
+  const staffContribution = financeSummary.staffMetrics.map((member) => ({
+    ...member,
+    hours: member.grossHours,
+  }));
+  const laborCost = financeSummary.laborCost;
+  const preTaxProfit = financeSummary.preTaxProfit;
+  const estimatedTax = financeSummary.estimatedTax;
+  const netProfit = financeSummary.netProfit;
 
   async function saveEntry(next: EntryForm, method: "POST" | "PATCH") {
     setMessage("");
@@ -212,7 +231,7 @@ export function FinanceWorkspace({
     setEfficiencyMessage("");
     startEfficiencyTransition(async () => {
       try {
-        const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit: scheduleState.timeUnit, hourlySalesProjection: avgProjection, assignments: scheduleState.assignments, seasonProfiles: scheduleState.seasonProfiles, activeSeasonProfileId: scheduleState.activeSeasonProfileId }) });
+        const response = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ timeUnit: scheduleState.timeUnit, hourlySalesProjection: avgProjection, assignments: assignmentView, staffTemplates: scheduleState.staffTemplates, absenceOverrides: scheduleState.absenceOverrides, seasonProfiles: scheduleState.seasonProfiles, activeSeasonProfileId: scheduleState.activeSeasonProfileId }) });
         const { message: apiMessage } = await readApiResponse<{ message?: string }>(response);
         if (!response.ok) { setEfficiencyMessage(apiMessage ?? "효율 분석 설정 저장에 실패했습니다."); return; }
         setEfficiencyMessage("효율 분석 설정을 저장했습니다.");
@@ -250,7 +269,7 @@ export function FinanceWorkspace({
         {tab === "overview" ? <div style={S.grid3}>
           <Block title="지출 구조">{expenseItems.length === 0 ? <div style={S.muted}>이번 달 지출 항목이 없습니다.</div> : expenseItems.map((item) => <Row key={item.id} title={item.category} meta={item.inputMode === "RATIO" ? `매출 대비 ${(item.ratioPercent ?? 0).toFixed(1)}%` : "금액 직접 입력"} value={`${item.computedAmount.toLocaleString()}원`} valueColor="#f87171" />)}</Block>
           <Block title="최근 입력">{monthItems.slice(0, 6).length === 0 ? <div style={S.muted}>최근 입력 내역이 없습니다.</div> : monthItems.slice(0, 6).map((item) => <Row key={item.id} title={item.category} meta={`${item.targetDate.slice(0, 10)} · ${item.memo || "메모 없음"}`} value={`${item.type === "REVENUE" ? "+" : "-"}${entryAmount(item, revenueBase).toLocaleString()}원`} valueColor={item.type === "REVENUE" ? "#34d399" : "#f87171"} />)}</Block>
-          <Block title="직원 매출 기여도">{staffContribution.length === 0 ? <div style={S.muted}>직원 데이터가 없습니다.</div> : staffContribution.map((member) => <Row key={member.id} title={member.name} meta={`근무 ${member.hours.toFixed(1)}h · 기대매출 ${member.expectedRevenue.toLocaleString()}원 · 총고용비 ${member.employerCost.toLocaleString()}원`} value={`${member.ownerContribution.toLocaleString()}원`} valueColor={member.ownerContribution >= 0 ? "#34d399" : "#f87171"} />)}</Block>
+          <Block title="직원 매출 기여도">{staffContribution.length === 0 ? <div style={S.muted}>직원 데이터가 없습니다.</div> : staffContribution.map((member) => <Row key={member.id} title={member.name ?? "직원"} meta={`근무 ${member.hours.toFixed(1)}h · 기대매출 ${member.expectedRevenue.toLocaleString()}원 · 총고용비 ${member.employerCost.toLocaleString()}원`} value={`${member.ownerContribution.toLocaleString()}원`} valueColor={member.ownerContribution >= 0 ? "#34d399" : "#f87171"} />)}</Block>
         </div> : null}
         {tab === "calendar" ? <div style={S.grid2}>
           <Block title="달력 입력"><div style={S.calendar}>{DAYS.map((day) => <div key={day} style={S.dayHead}>{day}</div>)}{renderCalendar(targetYear, targetMonth, dailyTotals, selectedDate, setSelectedDate, setForm)}</div></Block>
@@ -321,6 +340,8 @@ function normalizeSchedule(schedule: ScheduleSnapshot) {
   return {
     timeUnit: schedule?.timeUnit ?? 20,
     assignments: Object.fromEntries(WORK_DAYS.map((day) => [day, schedule?.assignments?.[day] ?? {}])) as Record<string, Record<number, string[]>>,
+    staffTemplates: schedule?.staffTemplates ?? {},
+    absenceOverrides: schedule?.absenceOverrides ?? {},
     seasonProfiles: schedule?.seasonProfiles?.length ? schedule.seasonProfiles : DEFAULT_PROFILES,
     activeSeasonProfileId: schedule?.activeSeasonProfileId ?? schedule?.seasonProfiles?.[0]?.id ?? DEFAULT_PROFILES[0].id,
   };
@@ -330,22 +351,6 @@ function averageProfile(profile: SeasonProfile) {
   const normalDays = WORK_DAYS.filter((day) => profile.dayTypes[day] !== "PEAK").length;
   const peakDays = WORK_DAYS.filter((day) => profile.dayTypes[day] === "PEAK").length;
   return Object.fromEntries(Array.from({ length: 24 }, (_, hour) => [hour, Math.round(((profile.normalHourlyProjection[hour] || 0) * normalDays + (profile.peakHourlyProjection[hour] || 0) * peakDays) / 7)])) as Record<number, number>;
-}
-
-function scheduledHours(timeUnit: number, assignments: Record<string, Record<number, string[]>>, staffId: string, year: number, month: number) {
-  const slots = Array.from({ length: (24 * 60) / timeUnit }, (_, i) => i * timeUnit);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  let total = 0;
-  for (let d = 1; d <= daysInMonth; d += 1) {
-    const day = DAYS[new Date(year, month - 1, d).getDay()];
-    const matches = slots.filter((slot) => assignments?.[day]?.[slot]?.includes(staffId));
-    if (matches.length) total += (Math.max(...matches) + timeUnit - Math.min(...matches)) / 60;
-  }
-  return total;
-}
-
-function entryAmount(item: Pick<FinanceItem, "type" | "inputMode" | "ratioPercent" | "amount">, revenueBase: number) {
-  return item.type === "EXPENSE" && item.inputMode === "RATIO" ? Math.round(revenueBase * ((item.ratioPercent ?? 0) / 100)) : item.amount;
 }
 
 function makePattern(lunch: number, dinner: number, normal: number, open: number, close: number) {

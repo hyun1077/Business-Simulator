@@ -6,6 +6,7 @@ import { WageScheduler } from "@/components/wage-scheduler";
 export default async function SchedulerPage() {
   const session = await requireSession();
   const data = await readAppData();
+  const store = data.stores.find((item) => item.id === session.storeId);
   const staff = data.staff
     .filter((item) => item.storeId === session.storeId)
     .map((item) => ({
@@ -38,7 +39,16 @@ export default async function SchedulerPage() {
           <DashboardTabs current="/dashboard/scheduler" role={session.role} />
         </div>
       </div>
-      <WageScheduler staff={staff} financeItems={financeItems} canEdit={session.role !== "STAFF"} />
+      <WageScheduler
+        staff={staff}
+        financeItems={financeItems}
+        canEdit={session.role !== "STAFF"}
+        financeSettings={{
+          expectedMonthlyRevenue: Number(store?.expectedMonthlyRevenue) || 0,
+          expectedProfitMarginRate: Number(store?.expectedProfitMarginRate) || 25,
+          estimatedTaxRate: Number(store?.estimatedTaxRate) || 10,
+        }}
+      />
     </>
   );
 }

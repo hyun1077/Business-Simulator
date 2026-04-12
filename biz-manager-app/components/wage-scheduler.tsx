@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, AlertTriangle, Calendar, Check, ChevronDown, ChevronUp, Clock, FolderOpen, Lock, PieChart, RotateCcw, Save, Store, TrendingDown } from "lucide-react";
 import { readApiResponse } from "@/lib/client-api";
+import { getMonthFinanceBreakdown, getStaffMonthlyCompensation } from "@/lib/store-insights";
 import styles from "./wage-scheduler.module.css";
 
 const CALENDAR_DAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -25,7 +26,17 @@ type SeasonProfile = {
 type MonthlyLog = { startTime: number; endTime: number; breakHours: number };
 type Snapshot = { isSaved: boolean; staffSnapshot: Staff[]; dailyLogs: Record<string, MonthlyLog> };
 type Staff = { id: string; name: string; color: string; baseWage: number; targetWage: number; holidayWage: number; bonusWage: number; capacity: number; incentive: number; expectedSales?: number; performanceBonus?: number; mealAllowance?: number; transportAllowance?: number; otherAllowance?: number; employmentType?: "HOURLY" | "MONTHLY"; monthlySalary?: number; expectedMonthlyHours?: number; weeklyWorkingHours?: number; weeklyWorkingDays?: number; insuranceType?: "NONE" | "FREELANCER" | "FOUR_INSURANCE"; insuranceRate?: number };
-type FinanceItem = { id: string; type: "REVENUE" | "EXPENSE"; category: string; amount: number; memo?: string | null };
+type FinanceItem = {
+  id: string;
+  type: "REVENUE" | "EXPENSE";
+  category: string;
+  amount: number;
+  memo?: string | null;
+  targetDate: string;
+  inputMode?: "AMOUNT" | "RATIO";
+  ratioPercent?: number | null;
+};
+type FinanceSettings = { expectedMonthlyRevenue: number; expectedProfitMarginRate: number; estimatedTaxRate: number };
 type EditForm = { start: string; end: string; break: number | string };
 
 const DEFAULT_PATTERNS: Pattern[] = [
@@ -165,7 +176,17 @@ function getAverageAssignedHeadcount(schedule: ScheduleShape, timeUnit: number, 
   return slots.length > 0 ? total / (slots.length * SCHEDULE_DAYS.length) : 0;
 }
 
-export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]; financeItems: FinanceItem[]; canEdit: boolean }) {
+export function WageScheduler({
+  staff,
+  financeItems,
+  canEdit,
+  financeSettings,
+}: {
+  staff: Staff[];
+  financeItems: FinanceItem[];
+  canEdit: boolean;
+  financeSettings: FinanceSettings;
+}) {
   const [tab, setTab] = useState<TabId>("schedule");
   const [timeUnit, setTimeUnit] = useState<20 | 30 | 60>(20);
   const [showEarlyHours, setShowEarlyHours] = useState(false);
@@ -201,8 +222,6 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     () => seasonProfiles.find((profile) => profile.id === activeSeasonProfileId) ?? seasonProfiles[0] ?? null,
     [activeSeasonProfileId, seasonProfiles],
   );
-  const totalRevenue = useMemo(() => sum(financeItems.filter((item) => item.type === "REVENUE").map((item) => item.amount)), [financeItems]);
-  const totalExpense = useMemo(() => sum(financeItems.filter((item) => item.type === "EXPENSE").map((item) => item.amount)), [financeItems]);
   const assignedSlotCount = useMemo(() => Object.values(schedule).reduce((acc, slots) => acc + Object.values(slots).filter((ids) => ids.length > 0).length, 0), [schedule]);
 
   useEffect(() => {
@@ -388,28 +407,43 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
     return merged;
   }, [absenceOverrides, activeSlots, manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, timeUnit]);
 
+  const monthlyFinance = useMemo(
+    () => getMonthFinanceBreakdown(financeItems, targetYear, targetMonth, financeSettings.expectedMonthlyRevenue),
+    [financeItems, financeSettings.expectedMonthlyRevenue, targetMonth, targetYear],
+  );
+
   const monthlyStats = useMemo(() => {
     const monthKey = `${targetYear}-${targetMonth}`;
     const sourceStaff = monthlySnapshots[monthKey]?.staffSnapshot ?? staff;
     let totalLabor = 0;
     const staffStats = sourceStaff.map((member) => {
       let monthlyGross = 0;
+      let monthlyNet = 0;
       let workedDays = 0;
-      let totalPay = member.incentive;
       Object.entries(currentMonthLogs).forEach(([key, log]) => {
         if (key.endsWith(`-${member.id}`)) {
           const gross = (log.endTime - log.startTime) / 60;
           const net = Math.max(0, gross - log.breakHours);
           monthlyGross += gross;
-          totalPay += net * member.targetWage;
+          monthlyNet += net;
           workedDays += 1;
         }
       });
-      totalLabor += totalPay;
-      return { ...member, monthlyGross, totalPay, workedDays };
+      const cost = getStaffMonthlyCompensation(member, monthlyGross, monthlyNet, financeSettings.expectedProfitMarginRate);
+      totalLabor += cost.employerCost;
+      return {
+        ...member,
+        monthlyGross,
+        monthlyNet,
+        workedDays,
+        totalPay: cost.employeePay,
+        employerCost: cost.employerCost,
+        expectedRevenue: cost.expectedRevenue,
+        ownerContribution: cost.ownerContribution,
+      };
     });
     return { totalLabor, staffStats, isSaved: Boolean(monthlySnapshots[monthKey]) };
-  }, [currentMonthLogs, monthlySnapshots, staff, targetMonth, targetYear]);
+  }, [currentMonthLogs, financeSettings.expectedProfitMarginRate, monthlySnapshots, staff, targetMonth, targetYear]);
 
   const selectedMonthlyStaff = monthlyStats.staffStats.find((member) => member.id === selectedStaffId) ?? monthlyStats.staffStats[0] ?? null;
   const selectedStaffMonthlyPlan = useMemo(() => {
@@ -433,7 +467,11 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
       progressPercent: targetHours > 0 ? Math.min((assignedHours / targetHours) * 100, 100) : 0,
     };
   }, [selectedMonthlyStaff, selectedStaff]);
-  const monthlyProfit = totalRevenue - totalExpense - monthlyStats.totalLabor;
+  const totalRevenue = monthlyFinance.revenueBase;
+  const totalExpense = monthlyFinance.totalExpense;
+  const monthlyProfitBeforeTax = totalRevenue - totalExpense - monthlyStats.totalLabor;
+  const estimatedTax = Math.max(monthlyProfitBeforeTax, 0) * (financeSettings.estimatedTaxRate / 100);
+  const monthlyProfit = monthlyProfitBeforeTax - estimatedTax;
   const laborRatio = totalRevenue > 0 ? (monthlyStats.totalLabor / totalRevenue) * 100 : 0;
 
   const hourlyChartData = useMemo(() => Array.from({ length: 24 }, (_, hour) => {
@@ -752,7 +790,7 @@ export function WageScheduler({ staff, financeItems, canEdit }: { staff: Staff[]
                   ) : null}
                 </div>
               </div>
-              <div className={styles.panel}><div className={styles.toolbarTitle} style={{ fontSize: 18 }}><Store size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />월 손익 요약</div><div style={{ display: "grid", gap: 12, fontSize: 15 }}><SummaryRow label="총 매출" value={`${totalRevenue.toLocaleString()}원`} color="#34d399" /><SummaryRow label="총 지출" value={`-${totalExpense.toLocaleString()}원`} color="#f87171" /><SummaryRow label="예상 인건비" value={`-${monthlyStats.totalLabor.toLocaleString()}원`} color="#fb923c" /><SummaryRow label="예상 순이익" value={`${monthlyProfit.toLocaleString()}원`} color={monthlyProfit >= 0 ? "#34d399" : "#f87171"} strong /></div></div>
+              <div className={styles.panel}><div className={styles.toolbarTitle} style={{ fontSize: 18 }}><Store size={18} style={{ verticalAlign: "middle", marginRight: 8 }} />월 손익 요약</div><div style={{ display: "grid", gap: 12, fontSize: 15 }}><SummaryRow label="월 매출 기준" value={`${totalRevenue.toLocaleString()}원`} color="#34d399" /><SummaryRow label="총 지출" value={`-${totalExpense.toLocaleString()}원`} color="#f87171" /><SummaryRow label="예상 인건비" value={`-${monthlyStats.totalLabor.toLocaleString()}원`} color="#fb923c" /><SummaryRow label="예상 세금" value={`-${Math.round(estimatedTax).toLocaleString()}원`} color="#fbbf24" /><SummaryRow label="예상 순이익" value={`${monthlyProfit.toLocaleString()}원`} color={monthlyProfit >= 0 ? "#34d399" : "#f87171"} strong /></div></div>
             </section>
             <section className={styles.panel}>
               <div className={styles.toolbar}>
