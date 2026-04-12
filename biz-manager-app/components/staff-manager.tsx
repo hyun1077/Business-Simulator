@@ -508,12 +508,14 @@ export function StaffManager({
     }
     popup.document.write(buildContractPrintHtml(contractView));
     popup.document.close();
-    popup.onload = () => {
+    const triggerPrint = () => {
       popup.focus();
-      window.setTimeout(() => {
+      popup.setTimeout(() => {
         popup.print();
-      }, 180);
+      }, 250);
     };
+    popup.onload = triggerPrint;
+    triggerPrint();
     return;
     /* legacy print block
     if (!popup) {
@@ -1507,6 +1509,14 @@ function buildContractPrintHtml(view: ContractView) {
       .signature-line{border-top:1px solid #0f172a}
       @media print{body{margin:18px}.contract-section,.signature-box{break-inside:avoid}}
     </style>
+    <script>
+      window.addEventListener("load", function () {
+        window.setTimeout(function () {
+          window.focus();
+          window.print();
+        }, 250);
+      });
+    </script>
   </head>
   <body>
     <h1>${escapeHtml(view.title)}</h1>
