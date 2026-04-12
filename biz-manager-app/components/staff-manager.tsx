@@ -501,31 +501,40 @@ export function StaffManager({
 
   function printContract() {
     if (!contractView || !selectedStaff) return;
-    const popup = window.open("", "_blank", "noopener,noreferrer,width=960,height=1100");
-    if (!popup) {
-      setNotice("팝업이 차단되어 인쇄 창을 열지 못했습니다.");
-      return;
-    }
-    popup.document.write(buildContractPrintHtml(contractView));
-    popup.document.close();
-    const triggerPrint = () => {
-      popup.focus();
-      popup.setTimeout(() => {
-        popup.print();
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        iframe.remove();
+      }, 300);
+    };
+
+    iframe.onload = () => {
+      const frameWindow = iframe.contentWindow;
+      if (!frameWindow) {
+        setNotice("인쇄용 문서를 열지 못했습니다. 다시 시도해주세요.");
+        cleanup();
+        return;
+      }
+
+      frameWindow.onafterprint = cleanup;
+      window.setTimeout(() => {
+        frameWindow.focus();
+        frameWindow.print();
+        window.setTimeout(cleanup, 1500);
       }, 250);
     };
-    popup.onload = triggerPrint;
-    triggerPrint();
-    return;
-    /* legacy print block
-    if (!popup) {
-      setNotice("팝업이 차단되어 인쇄 창을 열지 못했습니다.");
-      return;
-    }
-    popup.document.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8" /><title>${selectedStaff.name} 근로계약서</title><style>body{font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;margin:40px;color:#0f172a;line-height:1.7}pre{white-space:pre-wrap;font-size:14px}</style></head><body><h1>${selectedStaff.name} 근로계약서</h1><pre>${escapeHtml(contractText)}</pre></body></html>`);
-    popup.document.close();
-    popup.focus();
-    popup.print(); */
+
+    document.body.appendChild(iframe);
+    iframe.srcdoc = buildContractPrintHtml(contractView);
   }
 
   return (
@@ -536,8 +545,8 @@ export function StaffManager({
         <section style={hero}>
           <div>
             <div style={eyebrow}>Staff Workspace</div>
-            <h1 style={title}>직원 등록 값 설명, 세금/보험 비율, 근로계약서를 같이 관리</h1>
-            <p style={desc}>각 항목 밑에 무엇을 넣는 값인지 설명을 붙였고, 프리랜서 3.3%와 4대보험 세부 부담률도 따로 저장할 수 있게 바꿨습니다.</p>
+            <h1 style={title}>직원 등록, 보상 구조, 시간표, 계약서를 한 화면에서 관리</h1>
+            <p style={desc}>핵심 입력과 결과 카드가 먼저 보이도록 정리하고, 보험 참고처럼 길지만 덜 자주 보는 내용은 아래로 내렸습니다.</p>
           </div>
           <div style={box}>
             <div><strong>{storeInfo.storeName}</strong></div>
@@ -557,61 +566,10 @@ export function StaffManager({
             <div style={splitHeader}>
               <div>
                 <h2 style={sectionTitle}>직원 등록</h2>
-                <p style={helpText}>입력칸 이름 아래 설명만 남기고, 큰 가이드 대신 2026년 기준 4대보험 참고 요율과 적용 기준을 같이 보이도록 정리했습니다.</p>
+                <p style={helpText}>이름, 급여 방식, 시급 또는 월급, 기대매출부터 먼저 입력하세요. 보험 참고 기준은 아래쪽 별도 카드로 내려서 정리했습니다.</p>
               </div>
             </div>
             <div style={stack}>
-              <div style={subtleBox}>
-                <div style={guideHeader}>
-                  <div>
-                    <strong style={{ display: "block", marginBottom: 6 }}>2026년 4대보험 참고 요율</strong>
-                    <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.6 }}>
-                      아래 값은 직원 등록 시 바로 참고할 수 있는 실무용 기준입니다. 각 입력칸에는 직원 부담률과 회사 부담률을 따로 넣고, 사업장 규모나 업종에 따라 달라지는 항목은 매장 기준으로 조정하세요.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setForm(applySuggestedInsuranceRates(form))}
-                    style={secondaryButton}
-                  >
-                    소규모 매장 기본값 적용
-                  </button>
-                </div>
-                <div style={insuranceGuideGrid}>
-                  {INSURANCE_REFERENCE.map((item) => (
-                    <div key={item.name} style={insuranceGuideCard}>
-                      <div style={{ fontWeight: 700, marginBottom: 8 }}>{item.name}</div>
-                      <div style={insuranceGuideLine}>
-                        <span style={insuranceGuideLabel}>개인 부담</span>
-                        <strong>{item.employee}</strong>
-                      </div>
-                      <div style={insuranceGuideLine}>
-                        <span style={insuranceGuideLabel}>회사 부담</span>
-                        <strong>{item.employer}</strong>
-                      </div>
-                      <div style={insuranceGuideNote}>{item.note}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={insuranceNotesWrap}>
-                  <div style={insuranceNoteCard}>
-                    <strong style={{ display: "block", marginBottom: 8 }}>소득에 따라 달라지는 부분</strong>
-                    <div style={insuranceBullet}>국민연금은 기준소득월액 기준이라 월 보수가 하한 40만원보다 낮거나 상한 637만원보다 높으면 실제 체감 비율이 달라집니다.</div>
-                    <div style={insuranceBullet}>건강보험과 장기요양보험은 보수월액 기준이라 급여 총액, 보수 정산, 육아휴직/입퇴사 여부에 따라 실제 공제액이 달라질 수 있습니다.</div>
-                    <div style={insuranceBullet}>산재보험은 개인 소득보다 업종 분류 영향이 큽니다. 음식점, 소매업, 제조업, 건설업마다 요율이 다릅니다.</div>
-                  </div>
-                  <div style={insuranceNoteCard}>
-                    <strong style={{ display: "block", marginBottom: 8 }}>고용보험 회사 부담 예시</strong>
-                    {EMPLOYMENT_INSURANCE_GUIDE.map((item) => (
-                      <div key={item.scope} style={employmentGuideRow}>
-                        <span>{item.scope}</span>
-                        <strong>{item.rate}</strong>
-                        <span style={{ color: "#64748b" }}>{item.note}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
               <div style={formGrid}>
                 {renderBasicFields(form, normalizedForm, setForm)}
               </div>
@@ -916,6 +874,58 @@ export function StaffManager({
             </section>
           </div>
         </div>
+
+        <section style={panelBox}>
+          <div style={splitHeader}>
+            <div>
+              <h2 style={sectionTitle}>2026년 4대보험 참고 요율</h2>
+              <p style={helpText}>직원 등록과 보상 구조를 먼저 본 뒤, 필요할 때 아래 기준을 참고해서 자동 계산값을 점검할 수 있게 아래로 내렸습니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(applySuggestedInsuranceRates(form))}
+              style={secondaryButton}
+            >
+              소규모 매장 기본값 적용
+            </button>
+          </div>
+          <div style={stack}>
+            <div style={insuranceGuideGrid}>
+              {INSURANCE_REFERENCE.map((item) => (
+                <div key={item.name} style={insuranceGuideCard}>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>{item.name}</div>
+                  <div style={insuranceGuideLine}>
+                    <span style={insuranceGuideLabel}>개인 부담</span>
+                    <strong>{item.employee}</strong>
+                  </div>
+                  <div style={insuranceGuideLine}>
+                    <span style={insuranceGuideLabel}>회사 부담</span>
+                    <strong>{item.employer}</strong>
+                  </div>
+                  <div style={insuranceGuideNote}>{item.note}</div>
+                </div>
+              ))}
+            </div>
+            <div style={insuranceNotesWrap}>
+              <div style={insuranceNoteCard}>
+                <strong style={{ display: "block", marginBottom: 8 }}>소득에 따라 달라지는 부분</strong>
+                <div style={insuranceBullet}>국민연금은 기준소득월액 기준이라 월 보수가 하한 40만원보다 낮거나 상한 637만원보다 높으면 실제 체감 비율이 달라집니다.</div>
+                <div style={insuranceBullet}>건강보험과 장기요양보험은 보수월액 기준이라 급여 총액, 보수 정산, 육아휴직/입퇴사 여부에 따라 실제 공제액이 달라질 수 있습니다.</div>
+                <div style={insuranceBullet}>산재보험은 개인 소득보다 업종 분류 영향이 큽니다. 음식점, 소매업, 제조업, 건설업마다 요율이 다릅니다.</div>
+              </div>
+              <div style={insuranceNoteCard}>
+                <strong style={{ display: "block", marginBottom: 8 }}>고용보험 회사 부담 예시</strong>
+                {EMPLOYMENT_INSURANCE_GUIDE.map((item) => (
+                  <div key={item.scope} style={employmentGuideRow}>
+                    <span>{item.scope}</span>
+                    <strong>{item.rate}</strong>
+                    <span style={{ color: "#64748b" }}>{item.note}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   );
@@ -1509,14 +1519,6 @@ function buildContractPrintHtml(view: ContractView) {
       .signature-line{border-top:1px solid #0f172a}
       @media print{body{margin:18px}.contract-section,.signature-box{break-inside:avoid}}
     </style>
-    <script>
-      window.addEventListener("load", function () {
-        window.setTimeout(function () {
-          window.focus();
-          window.print();
-        }, 250);
-      });
-    </script>
   </head>
   <body>
     <h1>${escapeHtml(view.title)}</h1>
