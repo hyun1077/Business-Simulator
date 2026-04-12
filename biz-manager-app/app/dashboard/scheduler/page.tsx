@@ -43,6 +43,7 @@ export default async function SchedulerPage() {
         staff={staff}
         financeItems={financeItems}
         canEdit={session.role !== "STAFF"}
+        storageScope={`${session.loginId}:${session.storeId}`}
         financeSettings={{
           expectedMonthlyRevenue: Number(store?.expectedMonthlyRevenue) || 0,
           expectedProfitMarginRate: Number(store?.expectedProfitMarginRate) || 25,

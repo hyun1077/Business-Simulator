@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, AlertTriangle, Calendar, Check, ChevronDown, ChevronUp, Clock, FolderOpen, Lock, PieChart, RotateCcw, Save, Store, TrendingDown } from "lucide-react";
+import { patchWorkspaceCache, readWorkspaceCache } from "@/lib/browser-cache";
 import { readApiResponse } from "@/lib/client-api";
 import { getMonthFinanceBreakdown, getStaffMonthlyCompensation } from "@/lib/store-insights";
 import styles from "./wage-scheduler.module.css";
@@ -180,17 +181,22 @@ export function WageScheduler({
   staff,
   financeItems,
   canEdit,
+  storageScope,
   financeSettings,
 }: {
   staff: Staff[];
   financeItems: FinanceItem[];
   canEdit: boolean;
+  storageScope: string;
   financeSettings: FinanceSettings;
 }) {
   const [tab, setTab] = useState<TabId>("schedule");
   const [timeUnit, setTimeUnit] = useState<20 | 30 | 60>(20);
   const [showEarlyHours, setShowEarlyHours] = useState(false);
   const [businessHours, setBusinessHours] = useState({ start: 10, end: 22 });
+  const [staffData, setStaffData] = useState(staff);
+  const [financeItemsData, setFinanceItemsData] = useState(financeItems);
+  const [financeSettingsData, setFinanceSettingsData] = useState(financeSettings);
   const [staffTemplates, setStaffTemplates] = useState<StaffTemplateMap>(() => createEmptyStaffTemplates(staff));
   const [absenceOverrides, setAbsenceOverrides] = useState<AbsenceOverrideMap>({});
   const [selectedStaffId, setSelectedStaffId] = useState(staff[0]?.id ?? "");
@@ -210,14 +216,15 @@ export function WageScheduler({
   const [manualEdits, setManualEdits] = useState<Record<string, MonthlyLog | "DELETE">>({});
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({ start: "", end: "", break: 0 });
+  const [cacheReady, setCacheReady] = useState(false);
   const row11AmRef = useRef<HTMLTableRowElement | null>(null);
 
   const activeSlots = useMemo(() => Array.from({ length: (24 * 60) / timeUnit }, (_, index) => index * timeUnit), [timeUnit]);
   const visibleSlots = useMemo(() => activeSlots.filter((slot) => (showEarlyHours ? true : slot >= 540)), [activeSlots, showEarlyHours]);
   const schedule = useMemo(() => buildCombinedSchedule(staffTemplates), [staffTemplates]);
-  const selectedStaff = useMemo(() => staff.find((member) => member.id === selectedStaffId) ?? staff[0] ?? null, [selectedStaffId, staff]);
-  const weeklySummary = useMemo(() => buildWeeklyStaffSummary(staff, schedule, timeUnit, activeSlots), [staff, schedule, timeUnit, activeSlots]);
-  const restaurantGuide = useMemo(() => getRestaurantGuide(staff), [staff]);
+  const selectedStaff = useMemo(() => staffData.find((member) => member.id === selectedStaffId) ?? staffData[0] ?? null, [selectedStaffId, staffData]);
+  const weeklySummary = useMemo(() => buildWeeklyStaffSummary(staffData, schedule, timeUnit, activeSlots), [staffData, schedule, timeUnit, activeSlots]);
+  const restaurantGuide = useMemo(() => getRestaurantGuide(staffData), [staffData]);
   const activeSeasonProfile = useMemo(
     () => seasonProfiles.find((profile) => profile.id === activeSeasonProfileId) ?? seasonProfiles[0] ?? null,
     [activeSeasonProfileId, seasonProfiles],
@@ -225,12 +232,56 @@ export function WageScheduler({
   const assignedSlotCount = useMemo(() => Object.values(schedule).reduce((acc, slots) => acc + Object.values(slots).filter((ids) => ids.length > 0).length, 0), [schedule]);
 
   useEffect(() => {
-    if (!staff.length) { setSelectedStaffId(""); return; }
-    if (!selectedStaffId || !staff.some((member) => member.id === selectedStaffId)) setSelectedStaffId(staff[0].id);
-  }, [selectedStaffId, staff]);
+    if (!staffData.length) { setSelectedStaffId(""); return; }
+    if (!selectedStaffId || !staffData.some((member) => member.id === selectedStaffId)) setSelectedStaffId(staffData[0].id);
+  }, [selectedStaffId, staffData]);
 
   useEffect(() => {
     async function loadSchedule() {
+      const cache = readWorkspaceCache(storageScope);
+      const cachedStaff = Array.isArray(cache?.staff) ? (cache.staff as Staff[]) : staff;
+      const cachedFinanceItems = Array.isArray(cache?.financeItems) ? (cache.financeItems as FinanceItem[]) : financeItems;
+      const cachedFinanceSettings =
+        cache?.financeSettings && typeof cache.financeSettings === "object"
+          ? (cache.financeSettings as FinanceSettings)
+          : financeSettings;
+
+      setStaffData(cachedStaff);
+      setFinanceItemsData(cachedFinanceItems);
+      setFinanceSettingsData(cachedFinanceSettings);
+
+      if (cache?.schedule && typeof cache.schedule === "object") {
+        const cachedSchedule = cache.schedule as {
+          assignments?: ScheduleShape;
+          timeUnit?: number;
+          staffTemplates?: StaffTemplateMap;
+          absenceOverrides?: AbsenceOverrideMap;
+          seasonProfiles?: SeasonProfile[];
+          activeSeasonProfileId?: string | null;
+          hourlySalesProjection?: Record<number, number>;
+        };
+        const nextTimeUnit = cachedSchedule.timeUnit === 30 || cachedSchedule.timeUnit === 60 ? cachedSchedule.timeUnit : 20;
+        const loadedSeasonProfiles =
+          Array.isArray(cachedSchedule.seasonProfiles) && cachedSchedule.seasonProfiles.length > 0
+            ? cachedSchedule.seasonProfiles
+            : DEFAULT_SEASON_PROFILES;
+        const loadedSeasonId =
+          cachedSchedule.activeSeasonProfileId ??
+          loadedSeasonProfiles[0]?.id ??
+          DEFAULT_SEASON_PROFILES[0].id;
+        setStaffTemplates(normalizeStaffTemplates(cachedStaff, cachedSchedule.staffTemplates, cachedSchedule.assignments));
+        setAbsenceOverrides(normalizeAbsenceOverrides(cachedSchedule.absenceOverrides));
+        setTimeUnit(nextTimeUnit);
+        setSeasonProfiles(loadedSeasonProfiles);
+        setActiveSeasonProfileId(loadedSeasonId);
+        const activeProfile = loadedSeasonProfiles.find((profile: SeasonProfile) => profile.id === loadedSeasonId) ?? loadedSeasonProfiles[0];
+        setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(cachedSchedule.hourlySalesProjection ?? {}) });
+        setLoading(false);
+        setCacheReady(true);
+        setCacheReady(true);
+        return;
+      }
+
       try {
         const response = await fetch("/api/schedule");
         const { data, message } = await readApiResponse<{ schedule?: {
@@ -243,7 +294,7 @@ export function WageScheduler({
           hourlySalesProjection?: Record<number, number>;
         }; message?: string }>(response);
         if (data?.schedule) {
-          setStaffTemplates(normalizeStaffTemplates(staff, data.schedule.staffTemplates, data.schedule.assignments));
+          setStaffTemplates(normalizeStaffTemplates(cachedStaff, data.schedule.staffTemplates, data.schedule.assignments));
           setAbsenceOverrides(normalizeAbsenceOverrides(data.schedule.absenceOverrides));
           const nextTimeUnit = data.schedule.timeUnit === 30 || data.schedule.timeUnit === 60 ? data.schedule.timeUnit : 20;
           setTimeUnit(nextTimeUnit);
@@ -260,7 +311,7 @@ export function WageScheduler({
           const activeProfile = loadedSeasonProfiles.find((profile: SeasonProfile) => profile.id === loadedSeasonId) ?? loadedSeasonProfiles[0];
           setHourlySalesProjection(activeProfile ? buildSeasonAverageProjection(activeProfile) : { ...DEFAULT_PATTERNS[0].data, ...(data.schedule.hourlySalesProjection ?? {}) });
         } else {
-          setStaffTemplates(createEmptyStaffTemplates(staff));
+          setStaffTemplates(createEmptyStaffTemplates(cachedStaff));
           setAbsenceOverrides({});
           if (message) {
             setSaveMessage(message);
@@ -273,7 +324,25 @@ export function WageScheduler({
       }
     }
     void loadSchedule();
-  }, [staff]);
+  }, [financeItems, financeSettings, staff, storageScope]);
+
+  useEffect(() => {
+    if (!cacheReady) return;
+    patchWorkspaceCache(storageScope, {
+      staff: staffData,
+      financeItems: financeItemsData,
+      financeSettings: financeSettingsData,
+      schedule: {
+        timeUnit,
+        assignments: schedule,
+        staffTemplates,
+        absenceOverrides,
+        seasonProfiles,
+        activeSeasonProfileId,
+        hourlySalesProjection,
+      },
+    });
+  }, [absenceOverrides, activeSeasonProfileId, cacheReady, financeItemsData, financeSettingsData, hourlySalesProjection, schedule, seasonProfiles, staffData, staffTemplates, storageScope, timeUnit]);
 
   useEffect(() => {
     if (tab === "schedule" && row11AmRef.current) row11AmRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -380,7 +449,7 @@ export function WageScheduler({
   function generateDefaultLogsForMonth(year: number, month: number) {
     const logs: Record<string, MonthlyLog> = {};
     const daysInMonth = new Date(year, month, 0).getDate();
-    staff.forEach((member) => {
+    staffData.forEach((member) => {
       for (let date = 1; date <= daysInMonth; date += 1) {
         if (hasAbsence(absenceOverrides, year, month, date, member.id)) continue;
         const dayLabel = CALENDAR_DAYS[new Date(year, month - 1, date).getDay()];
@@ -405,16 +474,16 @@ export function WageScheduler({
       if (year === targetYear && month === targetMonth) value === "DELETE" ? delete merged[key] : (merged[key] = value);
     });
     return merged;
-  }, [absenceOverrides, activeSlots, manualEdits, monthlySnapshots, schedule, staff, targetMonth, targetYear, timeUnit]);
+  }, [absenceOverrides, activeSlots, manualEdits, monthlySnapshots, schedule, staffData, targetMonth, targetYear, timeUnit]);
 
   const monthlyFinance = useMemo(
-    () => getMonthFinanceBreakdown(financeItems, targetYear, targetMonth, financeSettings.expectedMonthlyRevenue),
-    [financeItems, financeSettings.expectedMonthlyRevenue, targetMonth, targetYear],
+    () => getMonthFinanceBreakdown(financeItemsData, targetYear, targetMonth, financeSettingsData.expectedMonthlyRevenue),
+    [financeItemsData, financeSettingsData.expectedMonthlyRevenue, targetMonth, targetYear],
   );
 
   const monthlyStats = useMemo(() => {
     const monthKey = `${targetYear}-${targetMonth}`;
-    const sourceStaff = monthlySnapshots[monthKey]?.staffSnapshot ?? staff;
+    const sourceStaff = monthlySnapshots[monthKey]?.staffSnapshot ?? staffData;
     let totalLabor = 0;
     const staffStats = sourceStaff.map((member) => {
       let monthlyGross = 0;
@@ -429,7 +498,7 @@ export function WageScheduler({
           workedDays += 1;
         }
       });
-      const cost = getStaffMonthlyCompensation(member, monthlyGross, monthlyNet, financeSettings.expectedProfitMarginRate);
+      const cost = getStaffMonthlyCompensation(member, monthlyGross, monthlyNet, financeSettingsData.expectedProfitMarginRate);
       totalLabor += cost.employerCost;
       return {
         ...member,
@@ -443,7 +512,7 @@ export function WageScheduler({
       };
     });
     return { totalLabor, staffStats, isSaved: Boolean(monthlySnapshots[monthKey]) };
-  }, [currentMonthLogs, financeSettings.expectedProfitMarginRate, monthlySnapshots, staff, targetMonth, targetYear]);
+  }, [currentMonthLogs, financeSettingsData.expectedProfitMarginRate, monthlySnapshots, staffData, targetMonth, targetYear]);
 
   const selectedMonthlyStaff = monthlyStats.staffStats.find((member) => member.id === selectedStaffId) ?? monthlyStats.staffStats[0] ?? null;
   const selectedStaffMonthlyPlan = useMemo(() => {
@@ -470,7 +539,7 @@ export function WageScheduler({
   const totalRevenue = monthlyFinance.revenueBase;
   const totalExpense = monthlyFinance.totalExpense;
   const monthlyProfitBeforeTax = totalRevenue - totalExpense - monthlyStats.totalLabor;
-  const estimatedTax = Math.max(monthlyProfitBeforeTax, 0) * (financeSettings.estimatedTaxRate / 100);
+  const estimatedTax = Math.max(monthlyProfitBeforeTax, 0) * (financeSettingsData.estimatedTaxRate / 100);
   const monthlyProfit = monthlyProfitBeforeTax - estimatedTax;
   const laborRatio = totalRevenue > 0 ? (monthlyStats.totalLabor / totalRevenue) * 100 : 0;
 
@@ -482,7 +551,7 @@ export function WageScheduler({
     slotsInHour.forEach((slot) => {
       SCHEDULE_DAYS.forEach((day) => {
         (schedule[day]?.[slot] || []).forEach((staffId) => {
-          const member = staff.find((item) => item.id === staffId);
+          const member = staffData.find((item) => item.id === staffId);
           if (!member) return;
           laborCost += member.targetWage * (timeUnit / 60) / 7;
           capacity += (member.expectedSales ?? member.capacity) * (timeUnit / 60) / 7;
@@ -490,7 +559,7 @@ export function WageScheduler({
       });
     });
     return { hour, sales, laborCost, capacity };
-  }), [activeSlots, hourlySalesProjection, schedule, staff, timeUnit]);
+  }), [activeSlots, hourlySalesProjection, schedule, staffData, timeUnit]);
   const staffingGuide = useMemo(
     () =>
       hourlyChartData
@@ -510,7 +579,7 @@ export function WageScheduler({
 
   function saveMonthlySnapshot() {
     const monthKey = `${targetYear}-${targetMonth}`;
-    setMonthlySnapshots((prev) => ({ ...prev, [monthKey]: { isSaved: true, staffSnapshot: JSON.parse(JSON.stringify(staff)) as Staff[], dailyLogs: JSON.parse(JSON.stringify(currentMonthLogs)) as Record<string, MonthlyLog> } }));
+    setMonthlySnapshots((prev) => ({ ...prev, [monthKey]: { isSaved: true, staffSnapshot: JSON.parse(JSON.stringify(staffData)) as Staff[], dailyLogs: JSON.parse(JSON.stringify(currentMonthLogs)) as Record<string, MonthlyLog> } }));
     setManualEdits((prev) => {
       const next = { ...prev };
       Object.keys(next).forEach((key) => {
@@ -583,7 +652,7 @@ export function WageScheduler({
           </div>
         </section>
         <section className={styles.metrics}>
-          <MetricCard label="등록 직원 수" value={`${staff.length}명`} helper="직원 관리와 연동" />
+          <MetricCard label="등록 직원 수" value={`${staffData.length}명`} helper="직원 관리와 연동" />
           <MetricCard label="배정 슬롯" value={`${assignedSlotCount}칸`} helper={`${timeUnit}분 단위 기준`} />
           <MetricCard label="월 예상 손익" value={`${monthlyProfit.toLocaleString()}원`} helper={`인건비율 ${laborRatio.toFixed(1)}%`} />
           <MetricCard label="권한" value={canEdit ? "직접 수정 가능" : "읽기 전용"} helper={canEdit ? "드래그 배정 사용 가능" : "조회만 가능"} />
@@ -607,7 +676,7 @@ export function WageScheduler({
                 </div>
                 {!canEdit ? <div className={styles.saveStatus}>직원 계정은 읽기 전용입니다.</div> : null}
               </div>
-              {!staff.length ? (
+              {!staffData.length ? (
                 <div className={styles.emptyState}>직원 관리에서 직원을 먼저 등록하면 여기서 바로 스케줄을 배정할 수 있습니다.</div>
               ) : (
                 <>
@@ -621,7 +690,7 @@ export function WageScheduler({
                   <div className={styles.controlBlock}>
                     <div className={styles.controlTitle}>배정할 직원 선택</div>
                     <div className={styles.chipRow}>
-                      {staff.map((member) => <button key={member.id} type="button" onClick={() => setSelectedStaffId(member.id)} className={`${styles.chipButton} ${selectedStaffId === member.id ? styles.chipActive : ""}`}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 999, background: resolveColor(member.color), marginRight: 8 }} />{member.name}</button>)}
+                      {staffData.map((member) => <button key={member.id} type="button" onClick={() => setSelectedStaffId(member.id)} className={`${styles.chipButton} ${selectedStaffId === member.id ? styles.chipActive : ""}`}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 999, background: resolveColor(member.color), marginRight: 8 }} />{member.name}</button>)}
                     </div>
                   </div>
                   <div className={styles.hintRow}><span>현재 선택: <strong>{selectedStaff?.name ?? "없음"}</strong></span><span>{showEarlyHours ? "00:00부터 전체 표시" : "09:00 이후만 표시 중"}</span></div>
@@ -661,7 +730,7 @@ export function WageScheduler({
                                 const ids = schedule[day]?.[slot] || [];
                                 return (
                                   <td key={`${day}-${slot}`} className={`${styles.slotCell} ${!canEdit ? styles.slotCellReadonly : ""} ${isHourStart ? styles.hourStart : ""}`} onMouseDown={() => { if (!canEdit) return; setDragging(true); handleCellToggle(day, slot); }} onMouseEnter={() => { if (!dragging || !canEdit) return; handleCellToggle(day, slot); }}>
-                                    <div className={styles.slotStack}>{ids.map((id) => { const member = staff.find((item) => item.id === id); return member ? <span key={id} className={styles.slotBadge} style={{ background: resolveColor(member.color) }}>{member.name}</span> : null; })}</div>
+                                    <div className={styles.slotStack}>{ids.map((id) => { const member = staffData.find((item) => item.id === id); return member ? <span key={id} className={styles.slotBadge} style={{ background: resolveColor(member.color) }}>{member.name}</span> : null; })}</div>
                                   </td>
                                 );
                               })}

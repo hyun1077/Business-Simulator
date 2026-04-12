@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { DollarSign, PencilLine, Receipt, Save, Trash2, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { DashboardTabs } from "@/components/dashboard-tabs";
+import { patchWorkspaceCache, readWorkspaceCache } from "@/lib/browser-cache";
 import { readApiResponse } from "@/lib/client-api";
 import { entryAmount, getScheduleAssignments, getStoreMonthInsights } from "@/lib/store-insights";
 import type { SystemRole } from "@/types/domain";
@@ -88,12 +89,14 @@ const DEFAULT_PROFILES: SeasonProfile[] = [
 export function FinanceWorkspace({
   initialItems,
   role,
+  storageScope,
   initialSettings,
   initialStaff,
   schedule,
 }: {
   initialItems: FinanceItem[];
   role: SystemRole;
+  storageScope: string;
   initialSettings: FinanceSettings;
   initialStaff: StaffMember[];
   schedule: ScheduleSnapshot;
@@ -115,6 +118,30 @@ export function FinanceWorkspace({
   const [form, setForm] = useState<EntryForm>({ type: "REVENUE", category: REVENUE_PRESETS[0], amount: 0, inputMode: "AMOUNT", ratioPercent: 0, memo: "", targetDate: new Date().toISOString().slice(0, 10) });
   const [editing, setEditing] = useState<EntryForm | null>(null);
   const [scheduleState, setScheduleState] = useState(() => normalizeSchedule(schedule));
+  const [cacheReady, setCacheReady] = useState(false);
+
+  useEffect(() => {
+    const cache = readWorkspaceCache(storageScope);
+    if (Array.isArray(cache?.financeItems)) {
+      setItems(cache.financeItems as FinanceItem[]);
+    }
+    if (cache?.financeSettings && typeof cache.financeSettings === "object") {
+      setSettings(cache.financeSettings as FinanceSettings);
+    }
+    if (cache?.schedule && typeof cache.schedule === "object") {
+      setScheduleState(normalizeSchedule(cache.schedule as ScheduleSnapshot));
+    }
+    setCacheReady(true);
+  }, [schedule, storageScope]);
+
+  useEffect(() => {
+    if (!cacheReady) return;
+    patchWorkspaceCache(storageScope, {
+      financeItems: items,
+      financeSettings: settings,
+      schedule: scheduleState as unknown as Record<string, unknown>,
+    });
+  }, [cacheReady, items, scheduleState, settings, storageScope]);
 
   const monthItems = useMemo(
     () =>

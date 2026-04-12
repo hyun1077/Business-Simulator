@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { patchWorkspaceCache, readWorkspaceCache } from "@/lib/browser-cache";
 import { readApiResponse } from "@/lib/client-api";
 import { DashboardTabs } from "@/components/dashboard-tabs";
 import type { SystemRole } from "@/types/domain";
@@ -76,6 +77,18 @@ type ContractDraft = {
   probationMonths: string;
   restRule: string;
   notes: string;
+};
+
+type ContractSection = {
+  title: string;
+  rows: Array<{ label: string; value: string }>;
+};
+
+type ContractView = {
+  title: string;
+  subtitle: string;
+  sections: ContractSection[];
+  signatures: Array<{ label: string; name: string }>;
 };
 
 type StaffForm = Omit<StaffMember, "id" | "holidayWage" | "bonusWage" | "capacity" | "incentive">;
@@ -212,11 +225,13 @@ export function StaffManager({
   initialStaff,
   role,
   schedule,
+  storageScope,
   storeInfo,
 }: {
   initialStaff: StaffMember[];
   role: SystemRole;
   schedule: ScheduleSnapshot;
+  storageScope: string;
   storeInfo: StoreInfo;
 }) {
   const [pending, startTransition] = useTransition();
@@ -235,6 +250,7 @@ export function StaffManager({
   const [employmentInsuranceScale, setEmploymentInsuranceScale] = useState<EmploymentInsuranceScale>("UNDER_150");
   const [industrialAccidentPreset, setIndustrialAccidentPreset] = useState<IndustrialAccidentPreset>(() => inferIndustrialAccidentPreset(storeInfo.businessType));
   const [customIndustrialAccidentRate, setCustomIndustrialAccidentRate] = useState(0.7);
+  const [cacheReady, setCacheReady] = useState(false);
   const [form, setForm] = useState<StaffForm>({
     name: "",
     color: "#10b981",
@@ -279,10 +295,42 @@ export function StaffManager({
   );
 
   useEffect(() => {
+    const cache = readWorkspaceCache(storageScope);
+    const restoredStaff = Array.isArray(cache?.staff) ? (cache.staff as StaffMember[]) : initialStaff;
+    setStaff(restoredStaff);
+    if (restoredStaff.length > 0) {
+      setSelectedStaffId((current) => (restoredStaff.some((item) => item.id === current) ? current : restoredStaff[0].id));
+    }
+
+    if (cache?.schedule && typeof cache.schedule === "object") {
+      const scheduleCache = cache.schedule as ScheduleSnapshot;
+      const nextTimeUnit = scheduleCache?.timeUnit === 30 || scheduleCache?.timeUnit === 60 ? scheduleCache.timeUnit : 20;
+      setScheduleTimeUnit(nextTimeUnit);
+      setTemplateMap(normalizeTemplateMap(restoredStaff, scheduleCache));
+      setAbsenceOverrides(normalizeAbsenceOverrides(scheduleCache?.absenceOverrides));
+    }
+
+    setCacheReady(true);
+  }, [initialStaff, schedule, storageScope]);
+
+  useEffect(() => {
     if (staff.length > 0 && !staff.some((item) => item.id === selectedStaffId)) {
       setSelectedStaffId(staff[0].id);
     }
   }, [selectedStaffId, staff]);
+
+  useEffect(() => {
+    if (!cacheReady) return;
+    patchWorkspaceCache(storageScope, {
+      staff,
+      schedule: {
+        timeUnit: scheduleTimeUnit,
+        assignments: combinedAssignments,
+        staffTemplates: templateMap,
+        absenceOverrides,
+      },
+    });
+  }, [absenceOverrides, cacheReady, combinedAssignments, scheduleTimeUnit, staff, storageScope, templateMap]);
 
   const selectedStaff = useMemo(
     () => staff.find((item) => item.id === selectedStaffId) ?? staff[0] ?? null,
@@ -362,10 +410,15 @@ export function StaffManager({
     } catch {}
   }, [draft, storageKey]);
 
+  const contractView = useMemo(() => {
+    if (!selectedStaff || !summary) return null;
+    return buildContractView(selectedStaff, summary, draft, storeInfo, weeklyRows, scheduleTimeUnit ?? null);
+  }, [draft, scheduleTimeUnit, selectedStaff, storeInfo, summary, weeklyRows]);
+
   const contractText = useMemo(() => {
-    if (!selectedStaff || !summary) return "";
-    return buildContractText(selectedStaff, summary, draft, storeInfo, weeklyRows, schedule?.timeUnit ?? null);
-  }, [draft, schedule?.timeUnit, selectedStaff, storeInfo, summary, weeklyRows]);
+    if (!contractView) return "";
+    return buildContractViewText(contractView);
+  }, [contractView]);
 
   async function submit() {
     setError("");
@@ -447,8 +500,22 @@ export function StaffManager({
   }
 
   function printContract() {
-    if (!contractText || !selectedStaff) return;
+    if (!contractView || !selectedStaff) return;
     const popup = window.open("", "_blank", "noopener,noreferrer,width=960,height=1100");
+    if (!popup) {
+      setNotice("팝업이 차단되어 인쇄 창을 열지 못했습니다.");
+      return;
+    }
+    popup.document.write(buildContractPrintHtml(contractView));
+    popup.document.close();
+    popup.onload = () => {
+      popup.focus();
+      window.setTimeout(() => {
+        popup.print();
+      }, 180);
+    };
+    return;
+    /* legacy print block
     if (!popup) {
       setNotice("팝업이 차단되어 인쇄 창을 열지 못했습니다.");
       return;
@@ -456,7 +523,7 @@ export function StaffManager({
     popup.document.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8" /><title>${selectedStaff.name} 근로계약서</title><style>body{font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;margin:40px;color:#0f172a;line-height:1.7}pre{white-space:pre-wrap;font-size:14px}</style></head><body><h1>${selectedStaff.name} 근로계약서</h1><pre>${escapeHtml(contractText)}</pre></body></html>`);
     popup.document.close();
     popup.focus();
-    popup.print();
+    popup.print(); */
   }
 
   return (
@@ -840,7 +907,7 @@ export function StaffManager({
                   </div>
                   <div style={previewBox}>
                     <div style={{ fontWeight: 700, marginBottom: 12 }}>{selectedStaff.name} 근로계약서 미리보기</div>
-                    <div style={previewText}>{contractText}</div>
+                    {contractView ? <ContractPreviewTable view={contractView} /> : <div style={previewText}>{contractText}</div>}
                   </div>
                 </div>
               )}
@@ -1270,6 +1337,186 @@ function createDraft(member: StaffMember | null, storeInfo: StoreInfo): Contract
   };
 }
 
+function buildContractView(
+  member: StaffMember,
+  summary: ReturnType<typeof getStaffSummary>,
+  draft: ContractDraft,
+  storeInfo: StoreInfo,
+  weeklyRows: Array<{ day: string; working: boolean; start: number | null; end: number | null; hours: number }>,
+  timeUnit: number | null,
+): ContractView {
+  const weeklySchedule = weeklyRows.some((row) => row.working)
+    ? weeklyRows
+        .map((row) => (row.working ? `${row.day} ${formatTime(row.start)} ~ ${formatTime(row.end)} (${row.hours.toFixed(1)}시간)` : `${row.day} 휴무`))
+        .join(" / ")
+    : "저장된 주간 스케줄이 없습니다.";
+
+  const insuranceText =
+    member.insuranceType === "FREELANCER"
+      ? `프리랜서 원천징수 ${member.freelancerTaxRate.toFixed(2)}%`
+      : member.insuranceType === "FOUR_INSURANCE"
+        ? [
+            `국민연금 근로자 ${member.nationalPensionEmployeeRate.toFixed(2)}% / 회사 ${member.nationalPensionEmployerRate.toFixed(2)}%`,
+            `건강보험 근로자 ${member.healthInsuranceEmployeeRate.toFixed(2)}% / 회사 ${member.healthInsuranceEmployerRate.toFixed(2)}%`,
+            `장기요양 근로자 ${member.longTermCareEmployeeRate.toFixed(2)}% / 회사 ${member.longTermCareEmployerRate.toFixed(2)}%`,
+            `고용보험 근로자 ${member.employmentInsuranceEmployeeRate.toFixed(2)}% / 회사 ${member.employmentInsuranceEmployerRate.toFixed(2)}%`,
+            `산재보험 회사 ${member.industrialAccidentEmployerRate.toFixed(2)}%`,
+          ].join(" / ")
+        : "보험 없음";
+
+  return {
+    title: "근로계약서",
+    subtitle: `${storeInfo.storeName} · ${member.name}`,
+    sections: [
+      {
+        title: "기본 정보",
+        rows: [
+          { label: "사업장명", value: storeInfo.storeName },
+          { label: "대표자", value: storeInfo.ownerName },
+          { label: "업종", value: storeInfo.businessType || "일반 매장" },
+          { label: "근로자", value: member.name },
+          {
+            label: "계약기간",
+            value:
+              draft.contractType === "OPEN"
+                ? `${formatDateText(draft.startDate)}부터 기간의 정함 없음`
+                : `${formatDateText(draft.startDate)} ~ ${formatDateText(draft.endDate)}`,
+          },
+          { label: "근무장소", value: draft.workPlace || "-" },
+          { label: "직무", value: draft.jobTitle || "-" },
+          { label: "업무내용", value: draft.workDescription || "-" },
+        ],
+      },
+      {
+        title: "근무 조건",
+        rows: [
+          { label: "예상 월 근로시간", value: `${Math.round(summary.workingHours).toLocaleString()}시간` },
+          { label: "스케줄 배정 단위", value: timeUnit ? `${timeUnit}분` : "미설정" },
+          { label: "주간 시간표", value: weeklySchedule },
+          { label: "휴게 및 휴무 기준", value: draft.restRule || "-" },
+          { label: "수습기간", value: draft.probationMonths ? `${draft.probationMonths}개월` : "없음" },
+        ],
+      },
+      {
+        title: "임금 및 수당",
+        rows: [
+          { label: "기본시급", value: `${member.baseWage.toLocaleString()}원` },
+          { label: "주휴수당 환산", value: `${member.holidayWage.toLocaleString()}원` },
+          { label: "상여", value: `${member.bonusWage.toLocaleString()}원` },
+          { label: "최종시급", value: `${member.targetWage.toLocaleString()}원` },
+          { label: "월급 환산 시급", value: `${summary.salaryHourly.toLocaleString()}원` },
+          { label: "성과급", value: `${member.performanceBonus.toLocaleString()}원` },
+          { label: "추가수당 합계", value: `${summary.extraAllowance.toLocaleString()}원` },
+          { label: "예상 월 총고용비", value: `${summary.employerMonthlyCost.toLocaleString()}원` },
+        ],
+      },
+      {
+        title: "보험 및 세금",
+        rows: [
+          { label: "보험/세금 방식", value: insuranceText },
+          { label: "회사 기준 실질 시급", value: `${summary.realHourly.toLocaleString()}원` },
+          { label: "시간당 기대매출", value: `${(member.expectedSales || member.capacity || 0).toLocaleString()}원` },
+          { label: "예상 월 기대매출", value: `${summary.monthlyExpectedSales.toLocaleString()}원` },
+        ],
+      },
+      {
+        title: "지급 및 특약",
+        rows: [
+          { label: "임금지급일", value: draft.payday || "-" },
+          { label: "지급방법", value: draft.paymentMethod || "-" },
+          { label: "사업장 주소", value: draft.employerAddress || "-" },
+          { label: "근로자 주소", value: draft.employeeAddress || "-" },
+          { label: "근로자 연락처", value: draft.employeePhone || "-" },
+          { label: "기타 약정", value: draft.notes || "별도 특약 없음" },
+        ],
+      },
+    ],
+    signatures: [
+      { label: "사용자", name: storeInfo.ownerName },
+      { label: "근로자", name: member.name },
+    ],
+  };
+}
+
+function buildContractViewText(view: ContractView) {
+  return [
+    view.title,
+    view.subtitle,
+    "",
+    ...view.sections.flatMap((section) => [
+      `[${section.title}]`,
+      ...section.rows.map((row) => `${row.label}: ${row.value}`),
+      "",
+    ]),
+    ...view.signatures.map((signature) => `${signature.label} ${signature.name} ____________________`),
+  ].join("\n");
+}
+
+function buildContractPrintHtml(view: ContractView) {
+  const sectionsHtml = view.sections
+    .map(
+      (section) => `
+        <section class="contract-section">
+          <h2>${escapeHtml(section.title)}</h2>
+          <table>
+            <tbody>
+              ${section.rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <th>${escapeHtml(row.label)}</th>
+                      <td>${escapeHtml(row.value).replaceAll("\n", "<br />")}</td>
+                    </tr>`,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </section>`,
+    )
+    .join("");
+
+  const signaturesHtml = view.signatures
+    .map(
+      (signature) => `
+        <div class="signature-box">
+          <div class="signature-label">${escapeHtml(signature.label)}</div>
+          <div class="signature-name">${escapeHtml(signature.name)}</div>
+          <div class="signature-line"></div>
+        </div>`,
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(view.subtitle)} ${escapeHtml(view.title)}</title>
+    <style>
+      body{font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;margin:32px;color:#0f172a;line-height:1.6}
+      h1{margin:0 0 8px;font-size:28px}
+      .subtitle{margin:0 0 20px;color:#475569}
+      .contract-section{margin-bottom:18px}
+      h2{margin:0 0 10px;font-size:16px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #cbd5e1;padding:10px 12px;vertical-align:top;font-size:13px}
+      th{width:28%;background:#f8fafc;text-align:left}
+      .signatures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:28px}
+      .signature-box{border:1px solid #cbd5e1;border-radius:10px;padding:16px}
+      .signature-label{font-size:12px;color:#64748b;margin-bottom:8px}
+      .signature-name{font-size:16px;font-weight:700;margin-bottom:28px}
+      .signature-line{border-top:1px solid #0f172a}
+      @media print{body{margin:18px}.contract-section,.signature-box{break-inside:avoid}}
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(view.title)}</h1>
+    <p class="subtitle">${escapeHtml(view.subtitle)}</p>
+    ${sectionsHtml}
+    <div class="signatures">${signaturesHtml}</div>
+  </body>
+</html>`;
+}
+
 function buildContractText(
   member: StaffMember,
   summary: ReturnType<typeof getStaffSummary>,
@@ -1351,6 +1598,41 @@ function renderCalendar(year: number, month: number, logs: Record<string, { star
     );
   }
   return cells;
+}
+
+function ContractPreviewTable({ view }: { view: ContractView }) {
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>{view.title}</div>
+        <div style={{ color: "#64748b", fontSize: 13 }}>{view.subtitle}</div>
+      </div>
+      {view.sections.map((section) => (
+        <section key={section.title} style={contractSectionCard}>
+          <div style={contractSectionTitle}>{section.title}</div>
+          <table style={contractTable}>
+            <tbody>
+              {section.rows.map((row) => (
+                <tr key={`${section.title}-${row.label}`}>
+                  <th style={contractTableHead}>{row.label}</th>
+                  <td style={contractTableCell}>{row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
+      <div style={contractSignatureGrid}>
+        {view.signatures.map((signature) => (
+          <div key={`${signature.label}-${signature.name}`} style={contractSignatureCard}>
+            <div style={{ color: "#64748b", fontSize: 12, marginBottom: 6 }}>{signature.label}</div>
+            <div style={{ fontWeight: 700, marginBottom: 24 }}>{signature.name}</div>
+            <div style={{ borderTop: "1px solid #334155" }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function getInsuranceLabel(type: StaffMember["insuranceType"]) {
@@ -1482,5 +1764,12 @@ const calendarCell = { minHeight: 84, padding: 10, borderRadius: 14, border: "1p
 const contractLayout = { display: "grid", gap: 16, gridTemplateColumns: "minmax(320px, 460px) 1fr" } as const;
 const previewBox = { padding: 16, borderRadius: 18, border: "1px solid #1e293b", background: "#020617" } as const;
 const previewText = { whiteSpace: "pre-wrap", lineHeight: 1.8, fontSize: 13, color: "#e2e8f0", fontFamily: "\"Malgun Gothic\", \"Apple SD Gothic Neo\", sans-serif" } as const;
+const contractSectionCard = { display: "grid", gap: 10 } as const;
+const contractSectionTitle = { fontWeight: 700, fontSize: 14, color: "#cbd5e1" } as const;
+const contractTable = { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" } as const;
+const contractTableHead = { width: "28%", border: "1px solid #334155", background: "#081121", textAlign: "left", padding: "10px 12px", verticalAlign: "top", fontSize: 12, color: "#cbd5e1" } as const;
+const contractTableCell = { border: "1px solid #334155", padding: "10px 12px", verticalAlign: "top", fontSize: 13, lineHeight: 1.65, color: "#e2e8f0", whiteSpace: "pre-wrap" } as const;
+const contractSignatureGrid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" } as const;
+const contractSignatureCard = { padding: 14, borderRadius: 16, border: "1px solid #1e293b", background: "#081121" } as const;
 const errorText = { color: "#fca5a5" } as const;
 const rightColumn = { display: "grid", gap: 16, minWidth: 0 } as const;

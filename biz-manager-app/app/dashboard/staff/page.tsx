@@ -15,6 +15,7 @@ export default async function StaffPage() {
       initialStaff={staff}
       role={session.role}
       schedule={schedule}
+      storageScope={`${session.loginId}:${session.storeId}`}
       storeInfo={{
         storeName: store?.name ?? "매장명 미등록",
         ownerName: owner?.name ?? session.loginId,

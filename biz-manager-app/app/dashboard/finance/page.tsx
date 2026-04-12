@@ -16,6 +16,7 @@ export default async function FinancePage() {
     <FinanceWorkspace
       initialItems={items}
       role={session.role}
+      storageScope={`${session.loginId}:${session.storeId}`}
       initialSettings={{
         expectedProfitMarginRate: Number(store?.expectedProfitMarginRate) || 25,
         estimatedTaxRate: Number(store?.estimatedTaxRate) || 10,
